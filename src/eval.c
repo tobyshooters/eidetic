@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 
 static char* cursor;
 
@@ -213,6 +214,17 @@ eval(Node* node, Database* db)
     cell_free_temp(a);
     cell_free_temp(b);
     return cell_make_num(result);
+
+  } else if (strcasecmp(op, "screenshot") == 0) {
+    cell_free_temp(head);
+    char path[256];
+    snprintf(path, sizeof(path),
+             "images/scrot_%ld.png", (long)time(NULL));
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "scrot -s %s", path);
+    system(cmd);
+    Cell* img = cell_read_image(path);
+    return img ? img : cell_make_nil();
 
   } else if (strcasecmp(op, "cat") == 0) {
     char buf[MAX_KEY] = { 0 };

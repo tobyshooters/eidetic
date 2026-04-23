@@ -50,8 +50,9 @@ Parentheses are optional for simple commands.
 
 ### Images
 
-    read path       Load an image file as a cell value
-    set k (read f)  Store an image under a key
+    read path            Load an image or text file as a cell value
+    set k (read f)       Store an image under a key
+    set k (screenshot)   Take a screenshot (interactive select) and store it
 
 ### Math
 
