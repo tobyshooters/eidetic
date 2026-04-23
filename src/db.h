@@ -62,9 +62,6 @@ typedef struct
 } Database;
 
 void
-db_reflow(Database* db);
-
-void
 image_alloc(Image* img, int width, int height);
 void
 image_realloc(Image* img, int width, int height);
@@ -72,6 +69,8 @@ void
 image_free(Image* img);
 void
 image_clear(Image* img);
+void
+image_bounds(Image* img, int* x0, int* y0, int* x1, int* y1);
 
 void
 db_init(Database* db);
@@ -82,8 +81,6 @@ int
 db_set(Database* db, char* key, char* value);
 int
 db_set_cell(Database* db, char* key, Cell* src);
-char*
-db_get(Database* db, char* key);
 Cell*
 db_get_cell(Database* db, char* key);
 int
@@ -95,6 +92,8 @@ Cell*
 cell_make_num(int n);
 Cell*
 cell_make_nil(void);
+Cell*
+cell_copy(Cell* src);
 void
 cell_free_temp(Cell* cell);
 int

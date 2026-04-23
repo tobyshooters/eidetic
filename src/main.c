@@ -23,54 +23,49 @@ static int view_h = 0;
 static void
 content_bounds(Database* db, int* w, int* h)
 {
-  Image* img = &db->img;
-  int x1 = 0, y1 = 0;
-  for (int y = 0; y < img->height; y++) {
-    for (int x = 0; x < img->width; x++) {
-      int idx = (y * img->alloc_width + x) * 3;
-      if (img->data[idx] < 255 || img->data[idx + 1] < 255 ||
-          img->data[idx + 2] < 255) {
-        if (x > x1)
-          x1 = x;
-        if (y > y1)
-          y1 = y;
-      }
-    }
-  }
-  *w = x1 > 0 ? x1 + 2 : 64;
-  *h = y1 > 0 ? y1 + 2 : 64;
-  if (*w < 64)
+  int x0, y0, x1, y1;
+  image_bounds(&db->img, &x0, &y0, &x1, &y1);
+  *w = x1 + 2;
+  *h = y1 + 2;
+  if (*w < 64) {
     *w = 64;
-  if (*h < 64)
+  }
+  if (*h < 64) {
     *h = 64;
+  }
 }
 
 static void
 update_view(Database* db)
 {
   content_bounds(db, &view_w, &view_h);
-  if (view_h > MAX_VIEW_H)
+  if (view_h > MAX_VIEW_H) {
     view_h = MAX_VIEW_H;
+  }
 }
 
 static void
 clamp_scroll(Database* db)
 {
   int max = db->img.height - view_h;
-  if (max < 0)
+  if (max < 0) {
     max = 0;
-  if (scroll_y > max)
+  }
+  if (scroll_y > max) {
     scroll_y = max;
-  if (scroll_y < 0)
+  }
+  if (scroll_y < 0) {
     scroll_y = 0;
+  }
 }
 
 static SDL_Texture*
 remake_texture(SDL_Renderer* renderer, SDL_Texture* old,
                SDL_Window* window, Database* db)
 {
-  if (old)
+  if (old) {
     SDL_DestroyTexture(old);
+  }
   update_view(db);
   SDL_SetWindowSize(window, view_w * SCALE, view_h * SCALE);
   return SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24,
@@ -87,8 +82,9 @@ render(SDL_Renderer* renderer, SDL_Texture* texture, Database* db)
 
   for (int y = 0; y < view_h; y++) {
     int sy = y + scroll_y;
-    if (sy < 0 || sy >= img->height)
+    if (sy < 0 || sy >= img->height) {
       continue;
+    }
     for (int x = 0; x < view_w && x < img->width; x++) {
       int src = (sy * img->alloc_width + x) * 3;
       int dst = (y * view_w + x) * 3;
@@ -112,10 +108,12 @@ static Stack stack = { 0 };
 static void
 handle_input(char* line, Database* db, bool* running)
 {
-  while (*line && isspace(*line))
+  while (*line && isspace(*line)) {
     line++;
-  if (!*line)
+  }
+  if (!*line) {
     return;
+  }
 
   if (strcasecmp(line, "quit") == 0 || strcasecmp(line, "exit") == 0) {
     *running = false;
@@ -132,8 +130,9 @@ main(int argc, char* argv[])
   db_init(&db);
 
   if (argc > 1) {
-    if (db_load(&db, argv[1]) == 0)
+    if (db_load(&db, argv[1]) == 0) {
       printf("Loaded %s\n", argv[1]);
+    }
   }
 
   if (SDL_Init(SDL_INIT_VIDEO) < 0) {

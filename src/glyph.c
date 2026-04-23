@@ -153,8 +153,9 @@ write_text(uint8_t* data, int img_width, char* text, int x, int y,
             uint8_t r, uint8_t g, uint8_t b)
 {
   int n = strlen(text);
-  for (int i = 0; i < n; i++)
+  for (int i = 0; i < n; i++) {
     write_glyph(data, img_width, text[i], x + i * (FONT_WIDTH + 1), y, r, g, b);
+  }
 }
 
 char*
@@ -173,13 +174,15 @@ read_text(uint8_t* data, int img_width, int img_height, int x, int y)
         break;
       }
     }
-    if (ch == '\0' || ch == ' ')
+    if (ch == '\0' || ch == ' ') {
       break;
+    }
     buffer[count++] = ch;
     offset += FONT_WIDTH + 1;
   }
-  if (count == 0)
+  if (count == 0) {
     return NULL;
+  }
   buffer[count] = '\0';
   return buffer;
 }
