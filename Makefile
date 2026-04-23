@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -std=c99 -O2 -Wall -Wextra
+CFLAGS = -std=c99 -O2 -Wall -Wextra -Ideps
 LDFLAGS = -lSDL2 -lm
 
 SRC = src

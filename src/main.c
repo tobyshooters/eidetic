@@ -107,6 +107,8 @@ render(SDL_Renderer* renderer, SDL_Texture* texture, Database* db)
   SDL_RenderPresent(renderer);
 }
 
+static Stack stack = { 0 };
+
 static void
 handle_input(char* line, Database* db, bool* running)
 {
@@ -120,20 +122,7 @@ handle_input(char* line, Database* db, bool* running)
     return;
   }
 
-  char buf[MAX_INPUT + 4];
-  if (*line != '(') {
-    snprintf(buf, sizeof(buf), "(%s)", line);
-    line = buf;
-  }
-
-  Node* node = parse(line);
-  if (node) {
-    Cell* result = eval(node, db);
-    if (result && result->type != VAL_NIL && result->value[0])
-      printf("%s\n", result->value);
-    cell_free_temp(result);
-    node_free(node);
-  }
+  forth_eval(line, db, &stack);
 }
 
 int

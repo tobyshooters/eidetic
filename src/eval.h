@@ -3,28 +3,15 @@
 
 #include "db.h"
 
-#define MAX_CHILDREN 32
-#define MAX_TOKEN 256
+#define MAX_STACK 256
 
-typedef enum
+typedef struct
 {
-  NODE_ATOM,
-  NODE_LIST
-} NodeType;
+  Cell* items[MAX_STACK];
+  int top;
+} Stack;
 
-typedef struct Node
-{
-  NodeType type;
-  char atom[MAX_TOKEN];
-  struct Node* children[MAX_CHILDREN];
-  int child_count;
-} Node;
-
-Node*
-parse(char* input);
-Cell*
-eval(Node* node, Database* db);
 void
-node_free(Node* node);
+forth_eval(char* input, Database* db, Stack* stack);
 
 #endif

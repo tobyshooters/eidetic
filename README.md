@@ -7,7 +7,7 @@ Text is rendered with a 3x6 bitmap font directly into RGB pixels.
 The database file *is* the image; there is no separate format.
 
 An SDL2 window displays the live database while a stdin REPL
-accepts commands. Resizing the window reflows the layout.
+accepts commands. The evaluator is a Forth-style stack machine.
 
 ## Build
 
@@ -22,57 +22,76 @@ Keys use dot-separated namespaces. The part after the last dot
 is the local key; everything before it is the namespace.
 Keys without a dot go into the `home` namespace.
 
-    set age 30            -> home.age = 30
-    set metrics.cpu 90    -> metrics.cpu = 90
-    set docs.math.+ help  -> docs.math.+ = help
+    30 age SET                -> home.age = 30
+    90 metrics.cpu SET        -> metrics.cpu = 90
 
 Each namespace is a visual row in the image. Rows wrap when
 they exceed the window width.
 
 Deleting a namespace deletes all sub-namespaces too:
-`del docs` removes `docs`, `docs.math`, `docs.string`, etc.
+`docs DEL` removes `docs`, `docs.math`, `docs.string`, etc.
 
-## Commands
+## Language
 
-Parentheses are optional for simple commands.
-`set a 1` and `(set a 1)` are equivalent.
+Forth-style postfix. Words are whitespace-separated.
+Values are pushed onto a stack; commands pop their arguments.
+
+    42                        push number
+    "hello world"             push quoted string
+    age                       push literal "age"
+
+Use `.` to print the top of the stack.
 
 ### Database
 
-    save [name]     Save database to images/name (default: db.png)
-    load name       Load database from file
+    name SAVE                 save db to images/name (default: db.png)
+    name LOAD                 load db from file
 
 ### Cells
 
-    set key value   Set a key to a text or numeric value
-    get key         Get the value of a key
-    del key         Delete a key, or a whole namespace
+    val key SET               set key to value
+    key GET                   push value of key
+    key DEL                   delete key or namespace
 
 ### Images
 
-    read path            Load an image or text file as a cell value
-    set k (read f)       Store an image under a key
-    set k (screenshot)   Take a screenshot (interactive select) and store it
+    path READ                 load image or text file (.md, .txt)
+    path READ key SET         store image under key
+    SCREENSHOT key SET        interactive screenshot, store it
 
-### Math
+### Arithmetic
 
-    (+ a b ...)     Add
-    (- a b ...)     Subtract
-    (* a b ...)     Multiply
-    (/ a b)         Divide
-    (% a b)         Modulo
+    3 4 + .                   -> 7
+    10 3 - .                  -> 7
+    6 7 * .                   -> 42
+    10 3 / .                  -> 3
+    10 3 % .                  -> 1
 
 ### Strings
 
-    (cat a b ...)   Concatenate values
+    a b CAT                   concatenate two values
+
+### Stack
+
+    DUP                       duplicate top
+    DROP                      discard top
+    SWAP                      swap top two
+
+### Procedures
+
+    "2 *" double SET          store a procedure
+    5 double GET EXEC .       -> 10
 
 ### REPL
 
-    quit / exit     Close the program
+    quit / exit               close the program
+
+The stack persists across lines, so `5` on one line
+then `age SET` on the next works.
 
 ## Files
 
     src/main.c      REPL + SDL2 window
     src/db.h/c      Database, cells, rows, PNG I/O
-    src/eval.h/c    S-expression parser and evaluator
+    src/eval.h/c    Forth-style stack evaluator
     src/glyph.h/c   3x6 bitmap font

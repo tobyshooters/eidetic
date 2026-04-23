@@ -7,237 +7,257 @@
 #include <strings.h>
 #include <time.h>
 
-static char* cursor;
-
 static void
-skip_ws(void)
+push(Stack* s, Cell* c)
 {
-  while (*cursor && isspace(*cursor))
-    cursor++;
+  if (s->top < MAX_STACK)
+    s->items[s->top++] = c;
 }
 
-static Node*
-make_atom(char* text)
+static Cell*
+pop(Stack* s)
 {
-  Node* n = calloc(1, sizeof(Node));
-  n->type = NODE_ATOM;
-  snprintf(n->atom, MAX_TOKEN, "%s", text);
-  return n;
+  if (s->top > 0)
+    return s->items[--s->top];
+  return cell_make_nil();
 }
 
-static Node*
-make_list(void)
+static char*
+next_token(char** cursor, char* buf, int bufsize)
 {
-  Node* n = calloc(1, sizeof(Node));
-  n->type = NODE_LIST;
-  return n;
-}
-
-static Node*
-parse_expr(void)
-{
-  skip_ws();
-  if (!*cursor)
+  char* c = *cursor;
+  while (*c && isspace(*c))
+    c++;
+  if (!*c)
     return NULL;
 
-  if (*cursor == '(') {
-    cursor++;
-    Node* list = make_list();
-    while (1) {
-      skip_ws();
-      if (!*cursor || *cursor == ')')
-        break;
-      Node* child = parse_expr();
-      if (child && list->child_count < MAX_CHILDREN)
-        list->children[list->child_count++] = child;
+  int i = 0;
+
+  if (*c == '"') {
+    c++;
+    while (*c && *c != '"') {
+      if (i < bufsize - 1)
+        buf[i++] = *c;
+      c++;
     }
-    if (*cursor == ')')
-      cursor++;
-    return list;
+    if (*c == '"')
+      c++;
+  } else {
+    while (*c && !isspace(*c)) {
+      if (i < bufsize - 1)
+        buf[i++] = *c;
+      c++;
+    }
   }
 
-  char buf[MAX_TOKEN] = { 0 };
-  int i = 0;
-  while (*cursor && !isspace(*cursor) && *cursor != '(' && *cursor != ')') {
-    if (i < MAX_TOKEN - 1)
-      buf[i++] = *cursor;
-    cursor++;
-  }
-  return make_atom(buf);
+  buf[i] = '\0';
+  *cursor = c;
+  return buf;
 }
 
-Node*
-parse(char* input)
+static int
+is_number(char* s, long* out)
 {
-  cursor = input;
-  return parse_expr();
+  char* end;
+  *out = strtol(s, &end, 10);
+  return *end == '\0' && end != s;
 }
 
 void
-node_free(Node* node)
+forth_eval(char* input, Database* db, Stack* stack)
 {
-  if (!node)
-    return;
-  for (int i = 0; i < node->child_count; i++)
-    node_free(node->children[i]);
-  free(node);
-}
+  char* cursor = input;
+  char tok[MAX_KEY];
 
-Cell*
-eval(Node* node, Database* db)
-{
-  if (!node)
-    return cell_make_nil();
+  while (next_token(&cursor, tok, sizeof(tok))) {
+    long num;
 
-  if (node->type == NODE_ATOM) {
-    char* a = node->atom;
-    char* end;
-    long n = strtol(a, &end, 10);
-    if (*end == '\0' && end != a)
-      return cell_make_num((int)n);
-    return cell_make_text(a);
+    if (is_number(tok, &num)) {
+      push(stack, cell_make_num((int)num));
+      continue;
+    }
+
+    if (tok[0] == '@' && tok[1]) {
+      Cell* found = db_get_cell(db, tok + 1);
+      if (!found) {
+        push(stack, cell_make_nil());
+        continue;
+      }
+      Cell* copy = calloc(1, sizeof(Cell));
+      memcpy(copy, found, sizeof(Cell));
+      copy->img_data = NULL;
+      if (found->img_data) {
+        int sz = found->img_width * found->img_height * 3;
+        copy->img_data = malloc(sz);
+        memcpy(copy->img_data, found->img_data, sz);
+      }
+      push(stack, copy);
+      continue;
+    }
+
+    if (strcasecmp(tok, "SET") == 0) {
+      Cell* key = pop(stack);
+      Cell* val = pop(stack);
+      db_set_cell(db, key->value, val);
+      cell_free_temp(key);
+      cell_free_temp(val);
+
+    } else if (strcasecmp(tok, "GET") == 0) {
+      Cell* key = pop(stack);
+      Cell* found = db_get_cell(db, key->value);
+      cell_free_temp(key);
+      if (!found) {
+        push(stack, cell_make_nil());
+        continue;
+      }
+      Cell* copy = calloc(1, sizeof(Cell));
+      memcpy(copy, found, sizeof(Cell));
+      copy->img_data = NULL;
+      if (found->img_data) {
+        int sz = found->img_width * found->img_height * 3;
+        copy->img_data = malloc(sz);
+        memcpy(copy->img_data, found->img_data, sz);
+      }
+      push(stack, copy);
+
+    } else if (strcasecmp(tok, "DEL") == 0) {
+      Cell* key = pop(stack);
+      db_del(db, key->value);
+      cell_free_temp(key);
+
+    } else if (strcasecmp(tok, "SAVE") == 0) {
+      Cell* name = pop(stack);
+      db_save(db, name->value[0] ? name->value : NULL);
+      cell_free_temp(name);
+
+    } else if (strcasecmp(tok, "LOAD") == 0) {
+      Cell* name = pop(stack);
+      db_load(db, name->value);
+      cell_free_temp(name);
+
+    } else if (strcasecmp(tok, "READ") == 0) {
+      Cell* path = pop(stack);
+      Cell* img = cell_read_image(path->value);
+      cell_free_temp(path);
+      push(stack, img ? img : cell_make_nil());
+
+    } else if (strcasecmp(tok, "SCREENSHOT") == 0) {
+      char path[256];
+      snprintf(path, sizeof(path),
+               "images/scrot_%ld.png", (long)time(NULL));
+      char cmd[512];
+      snprintf(cmd, sizeof(cmd), "scrot -s %s", path);
+      if (system(cmd) != 0)
+        fprintf(stderr, "scrot failed\n");
+      Cell* img = cell_read_image(path);
+      push(stack, img ? img : cell_make_nil());
+
+    } else if (strcasecmp(tok, "RESIZE") == 0) {
+      Cell* size = pop(stack);
+      Cell* img = pop(stack);
+      int sz = cell_to_num(size);
+      if (img->type == VAL_IMAGE && img->value[0] && sz > 0) {
+        char cmd[512];
+        snprintf(cmd, sizeof(cmd),
+                 "convert %s -resize %dx%d %s",
+                 img->value, sz, sz, img->value);
+        if (system(cmd) != 0)
+          fprintf(stderr, "convert failed\n");
+        Cell* reloaded = cell_read_image(img->value);
+        cell_free_temp(img);
+        push(stack, reloaded ? reloaded : cell_make_nil());
+      } else {
+        push(stack, img);
+      }
+      cell_free_temp(size);
+
+    } else if (strcmp(tok, "+") == 0) {
+      Cell* b = pop(stack);
+      Cell* a = pop(stack);
+      push(stack, cell_make_num(cell_to_num(a) + cell_to_num(b)));
+      cell_free_temp(a);
+      cell_free_temp(b);
+
+    } else if (strcmp(tok, "-") == 0) {
+      Cell* b = pop(stack);
+      Cell* a = pop(stack);
+      push(stack, cell_make_num(cell_to_num(a) - cell_to_num(b)));
+      cell_free_temp(a);
+      cell_free_temp(b);
+
+    } else if (strcmp(tok, "*") == 0) {
+      Cell* b = pop(stack);
+      Cell* a = pop(stack);
+      push(stack, cell_make_num(cell_to_num(a) * cell_to_num(b)));
+      cell_free_temp(a);
+      cell_free_temp(b);
+
+    } else if (strcmp(tok, "/") == 0) {
+      Cell* b = pop(stack);
+      Cell* a = pop(stack);
+      int d = cell_to_num(b);
+      push(stack, cell_make_num(d == 0 ? 0 : cell_to_num(a) / d));
+      cell_free_temp(a);
+      cell_free_temp(b);
+
+    } else if (strcmp(tok, "%") == 0) {
+      Cell* b = pop(stack);
+      Cell* a = pop(stack);
+      int d = cell_to_num(b);
+      push(stack, cell_make_num(d == 0 ? 0 : cell_to_num(a) % d));
+      cell_free_temp(a);
+      cell_free_temp(b);
+
+    } else if (strcasecmp(tok, "CAT") == 0) {
+      Cell* b = pop(stack);
+      Cell* a = pop(stack);
+      char buf[MAX_KEY] = { 0 };
+      int len = snprintf(buf, MAX_KEY, "%s", a->value);
+      if (len < MAX_KEY)
+        snprintf(buf + len, MAX_KEY - len, "%s", b->value);
+      push(stack, cell_make_text(buf));
+      cell_free_temp(a);
+      cell_free_temp(b);
+
+    } else if (strcasecmp(tok, "DUP") == 0) {
+      Cell* a = pop(stack);
+      push(stack, a);
+      Cell* copy = calloc(1, sizeof(Cell));
+      memcpy(copy, a, sizeof(Cell));
+      copy->img_data = NULL;
+      if (a->img_data) {
+        int sz = a->img_width * a->img_height * 3;
+        copy->img_data = malloc(sz);
+        memcpy(copy->img_data, a->img_data, sz);
+      }
+      push(stack, copy);
+
+    } else if (strcasecmp(tok, "DROP") == 0) {
+      cell_free_temp(pop(stack));
+
+    } else if (strcasecmp(tok, "SWAP") == 0) {
+      Cell* b = pop(stack);
+      Cell* a = pop(stack);
+      push(stack, b);
+      push(stack, a);
+
+    } else if (strcasecmp(tok, "EXEC") == 0) {
+      Cell* code = pop(stack);
+      char buf[MAX_KEY];
+      snprintf(buf, MAX_KEY, "%s", code->value);
+      cell_free_temp(code);
+      forth_eval(buf, db, stack);
+
+    } else if (strcmp(tok, ".") == 0) {
+      Cell* a = pop(stack);
+      if (a->type != VAL_NIL && a->value[0])
+        printf("%s\n", a->value);
+      cell_free_temp(a);
+
+    } else {
+      // Check if previous position was a quote
+      // Otherwise push as string literal
+      push(stack, cell_make_text(tok));
+    }
   }
-
-  if (node->child_count == 0)
-    return cell_make_nil();
-
-  Cell* head = eval(node->children[0], db);
-  char* op = head->value;
-
-  if (strcasecmp(op, "set") == 0 && node->child_count >= 3) {
-    Cell* key = eval(node->children[1], db);
-    Cell* val = eval(node->children[2], db);
-    db_set_cell(db, key->value, val);
-    cell_free_temp(head);
-    cell_free_temp(key);
-    return val;
-
-  } else if (strcasecmp(op, "get") == 0 && node->child_count >= 2) {
-    Cell* key = eval(node->children[1], db);
-    Cell* found = db_get_cell(db, key->value);
-    cell_free_temp(head);
-    cell_free_temp(key);
-    if (!found)
-      return cell_make_nil();
-    Cell* copy = calloc(1, sizeof(Cell));
-    memcpy(copy, found, sizeof(Cell));
-    copy->img_data = NULL;
-    if (found->img_data) {
-      int sz = found->img_width * found->img_height * 3;
-      copy->img_data = malloc(sz);
-      memcpy(copy->img_data, found->img_data, sz);
-    }
-    return copy;
-
-  } else if (strcasecmp(op, "del") == 0 && node->child_count >= 2) {
-    Cell* key = eval(node->children[1], db);
-    db_del(db, key->value);
-    cell_free_temp(head);
-    cell_free_temp(key);
-    return cell_make_nil();
-
-  } else if (strcasecmp(op, "read") == 0 && node->child_count >= 2) {
-    Cell* path = eval(node->children[1], db);
-    Cell* img = cell_read_image(path->value);
-    cell_free_temp(head);
-    cell_free_temp(path);
-    return img ? img : cell_make_nil();
-
-  } else if (strcasecmp(op, "save") == 0) {
-    Cell* fn = node->child_count >= 2 ? eval(node->children[1], db) : NULL;
-    db_save(db, fn ? fn->value : NULL);
-    cell_free_temp(head);
-    Cell* result = cell_make_text(db->filename);
-    cell_free_temp(fn);
-    return result;
-
-  } else if (strcasecmp(op, "load") == 0 && node->child_count >= 2) {
-    Cell* fn = eval(node->children[1], db);
-    db_load(db, fn->value);
-    cell_free_temp(head);
-    return fn;
-
-  } else if (strcasecmp(op, "add") == 0 || strcasecmp(op, "+") == 0) {
-    int sum = 0;
-    for (int i = 1; i < node->child_count; i++) {
-      Cell* v = eval(node->children[i], db);
-      sum += cell_to_num(v);
-      cell_free_temp(v);
-    }
-    cell_free_temp(head);
-    return cell_make_num(sum);
-
-  } else if (strcasecmp(op, "sub") == 0 || strcasecmp(op, "-") == 0) {
-    cell_free_temp(head);
-    if (node->child_count < 2)
-      return cell_make_num(0);
-    Cell* first = eval(node->children[1], db);
-    int result = cell_to_num(first);
-    cell_free_temp(first);
-    for (int i = 2; i < node->child_count; i++) {
-      Cell* v = eval(node->children[i], db);
-      result -= cell_to_num(v);
-      cell_free_temp(v);
-    }
-    return cell_make_num(result);
-
-  } else if (strcasecmp(op, "mul") == 0 || strcasecmp(op, "*") == 0) {
-    int result = 1;
-    for (int i = 1; i < node->child_count; i++) {
-      Cell* v = eval(node->children[i], db);
-      result *= cell_to_num(v);
-      cell_free_temp(v);
-    }
-    cell_free_temp(head);
-    return cell_make_num(result);
-
-  } else if (strcasecmp(op, "div") == 0 || strcasecmp(op, "/") == 0) {
-    cell_free_temp(head);
-    if (node->child_count < 3)
-      return cell_make_num(0);
-    Cell* a = eval(node->children[1], db);
-    Cell* b = eval(node->children[2], db);
-    int denom = cell_to_num(b);
-    int result = denom == 0 ? 0 : cell_to_num(a) / denom;
-    cell_free_temp(a);
-    cell_free_temp(b);
-    return cell_make_num(result);
-
-  } else if (strcasecmp(op, "mod") == 0 || strcasecmp(op, "%") == 0) {
-    cell_free_temp(head);
-    if (node->child_count < 3)
-      return cell_make_num(0);
-    Cell* a = eval(node->children[1], db);
-    Cell* b = eval(node->children[2], db);
-    int denom = cell_to_num(b);
-    int result = denom == 0 ? 0 : cell_to_num(a) % denom;
-    cell_free_temp(a);
-    cell_free_temp(b);
-    return cell_make_num(result);
-
-  } else if (strcasecmp(op, "screenshot") == 0) {
-    cell_free_temp(head);
-    char path[256];
-    snprintf(path, sizeof(path),
-             "images/scrot_%ld.png", (long)time(NULL));
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "scrot -s %s", path);
-    system(cmd);
-    Cell* img = cell_read_image(path);
-    return img ? img : cell_make_nil();
-
-  } else if (strcasecmp(op, "cat") == 0) {
-    char buf[MAX_KEY] = { 0 };
-    for (int i = 1; i < node->child_count; i++) {
-      Cell* v = eval(node->children[i], db);
-      int len = strlen(buf);
-      snprintf(buf + len, MAX_KEY - len, "%s", v->value);
-      cell_free_temp(v);
-    }
-    cell_free_temp(head);
-    return cell_make_text(buf);
-
-  }
-
-  return head;
 }
