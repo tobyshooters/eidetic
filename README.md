@@ -32,7 +32,7 @@ Each namespace is a visual row in the image.
     
     val key SET               set key to value
     key GET                   push value of key
-    @key                      shorthand: fetch and execute
+    @key                      shorthand: fetch and push
     key DEL                   delete key or namespace
     
     DUP                       duplicate top
@@ -51,9 +51,18 @@ Each namespace is a visual row in the image.
     5 double GET EXEC .       -> 10
     5 @double .               -> 10 (shorthand)
 
+### Editing
+
+    val EDIT                  push text/number back to CLI for editing
+    img EDIT                  open image in gthumb for editing
+
+For text and numbers, EDIT places the value (quoted) in the input line so
+you can modify it before submitting. For images, gthumb opens non-blocking
+and the modified image is reloaded onto the stack when closed.
+
 ### Media
 
-    path READ                 load image or text file (.md, .txt)
+    path READ                 load image, text file, or audio
     SCREENSHOT                interactive screenshot (via scrot -s)
     img size RESIZE           resize image to size x size pixels
     TIME                      push time (YYYY-MM-DD HH:MM:SS)
@@ -64,6 +73,20 @@ Image cells are three rows: key, file path, and pixel data.
 The file path enables re-linking to the source file for image operations like
 RESIZE. If an image cell's source file is missing from disk, it is re-created
 from the pixels stored in the database image.
+
+### Audio
+
+    "song.mp3" READ           decode audio to PCM-as-pixels
+    img PLAY                  play audio image via ffplay
+    secs RECORD               record from mic for N seconds
+
+Audio files (.mp3, .wav, .ogg, .flac, .aac, .opus) are decoded via ffmpeg
+to 8kHz mono 16-bit PCM. Each sample is stored as one pixel: R = high byte,
+G = low byte, B = 0. A 10-second clip produces a 256x313 image.
+
+Since PNG is lossless, audio survives save/load round-trips perfectly.
+PLAY unpacks the pixels back to raw PCM and plays via ffplay.
+RECORD captures from the default PulseAudio input.
 
 ### Utility
 
