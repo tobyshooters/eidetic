@@ -1113,3 +1113,43 @@ db_load(Database* db, char* filename)
   return 0;
 }
 
+void
+db_sync_stack(Database* db, Cell** items, int count)
+{
+  for (int i = 0; i < db->row_count; i++) {
+    if (strcmp(db->rows[i].ns, "stack") == 0) {
+      for (int j = 0; j < db->rows[i].cell_count; j++) {
+        cell_free_internal(&db->rows[i].cells[j]);
+      }
+      for (int j = i; j < db->row_count - 1; j++) {
+        db->rows[j] = db->rows[j + 1];
+      }
+      db->row_count--;
+      break;
+    }
+  }
+
+  if (count == 0) {
+    render_all(db);
+    return;
+  }
+
+  for (int i = db->row_count; i > 0; i--) {
+    db->rows[i] = db->rows[i - 1];
+  }
+  db->row_count++;
+
+  Row* row = &db->rows[0];
+  memset(row, 0, sizeof(Row));
+  strcpy(row->ns, "stack");
+
+  for (int i = 0; i < count && i < MAX_CELLS; i++) {
+    Cell* cell = &row->cells[row->cell_count++];
+    memset(cell, 0, sizeof(Cell));
+    sprintf(cell->key, "%d", i);
+    cell_copy_value(cell, items[i]);
+  }
+
+  render_all(db);
+}
+

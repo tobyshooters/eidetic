@@ -140,6 +140,7 @@ handle_input(char* line, Database* db, bool* running)
   }
 
   forth_eval(line, db, &stack);
+  db_sync_stack(db, stack.items, stack.top);
 }
 
 int
