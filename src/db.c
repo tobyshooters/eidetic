@@ -865,7 +865,14 @@ db_reconstruct(Database* db)
   int nrows = 0;
 
   for (int y = 0; y + FONT_HEIGHT <= img->height && nrows < MAX_ROWS; y++) {
-    if (!col_has_dark(img->data, img->alloc_width, 1, y, FONT_HEIGHT)) {
+    int has_start = 0;
+    for (int dx = 0; dx < FONT_WIDTH; dx++) {
+      if (col_has_dark(img->data, img->alloc_width, 1 + dx, y, FONT_HEIGHT)) {
+        has_start = 1;
+        break;
+      }
+    }
+    if (!has_start) {
       continue;
     }
     char* text = read_text(img->data, img->alloc_width, img->height, 1, y);
@@ -915,7 +922,17 @@ db_reconstruct(Database* db)
 
     int x = max_lw;
     while (x + FONT_WIDTH <= img->width && nkeys < MAX_CELLS) {
-      while (x + FONT_WIDTH <= img->width && !col_has_dark(img->data, img->alloc_width, x, key_y, FONT_HEIGHT)) {
+      int found_dark = 0;
+      while (x + FONT_WIDTH <= img->width) {
+        for (int dx = 0; dx < FONT_WIDTH; dx++) {
+          if (col_has_dark(img->data, img->alloc_width, x + dx, key_y, FONT_HEIGHT)) {
+            found_dark = 1;
+            break;
+          }
+        }
+        if (found_dark) {
+          break;
+        }
         x++;
       }
       if (x + FONT_WIDTH > img->width) {
