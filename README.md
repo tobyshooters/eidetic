@@ -2,13 +2,11 @@
 
 An image-based programming system, with a Forth-like stack REPL.
 
-![images](./docs/fliptable.png)
-![audio](./docs/audio.png)
-![geometry](./docs/geometry.png)
-
 State is stored as a single PNG image, making snapshots first-class.
 Text is rendered with a 3x6 bitmap font directly into RGB pixels.
-This facilitate reconstruction, but should not be considered essential.
+This facilitates reconstruction of state, but should not be considered essential.
+
+![images](./docs/fliptable.png)
 
 ## Data model
 
@@ -78,6 +76,8 @@ from the pixels stored in the database image.
 
 ### Audio
 
+![audio](./docs/audio.png)
+
     "song.mp3" READ           decode audio to PCM-as-pixels
     img PLAY                  play audio image via ffplay
     secs RECORD               record from mic for N seconds
@@ -91,6 +91,8 @@ PLAY unpacks the pixels back to raw PCM and plays via ffplay.
 RECORD captures from the default PulseAudio input.
 
 ### 3D Geometry
+
+![geometry](./docs/geometry.png)
 
     "model.obj" READ              load OBJ as connectivity matrix image
     tex model RENDER              reconstruct OBJ, apply texture, open in f3d

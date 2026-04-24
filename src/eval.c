@@ -298,16 +298,27 @@ forth_eval(char* input, Database* db, Stack* stack, Cli* cli)
 
     } else if (strcasecmp(tok, "EDIT") == 0) {
       Cell* a = pop(stack);
-      if (a->type == VAL_IMAGE && a->value[0]) {
-        char path[512];
-        snprintf(path, sizeof(path), "images/%s", a->value);
+      if (a->type == VAL_IMAGE && a->img_data && a->value[0]) {
+        char out[256];
+        char* dot = strrchr(a->value, '.');
+        if (dot) {
+          int base = dot - a->value;
+          snprintf(out, sizeof(out), "%.*s_edit%s", base, a->value, dot);
+        } else {
+          snprintf(out, sizeof(out), "%s_edit", a->value);
+        }
+        char out_path[512];
+        snprintf(out_path, sizeof(out_path), "images/%s", out);
+        mkdir("images", 0755);
+        stbi_write_png(out_path, a->img_width, a->img_height, 3,
+                       a->img_data, a->img_width * 3);
         pid_t pid = fork();
         if (pid == 0) {
-          execlp("gthumb", "gthumb", path, NULL);
+          execlp("gthumb", "gthumb", out_path, NULL);
           _exit(1);
         } else if (pid > 0) {
           stack->edit_pid = pid;
-          snprintf(stack->edit_path, sizeof(stack->edit_path), "%s", a->value);
+          snprintf(stack->edit_path, sizeof(stack->edit_path), "%s", out);
         }
       } else if ((a->type == VAL_TEXT || a->type == VAL_NUM) && cli) {
         char quoted[MAX_INPUT];
