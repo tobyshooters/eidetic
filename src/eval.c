@@ -151,7 +151,7 @@ forth_eval(char* input, Database* db, Stack* stack)
     } else if (strcasecmp(tok, "SCREENSHOT") == 0) {
       char fname[128];
       snprintf(fname, sizeof(fname),
-               "scrot_%ld.png", (long)time(NULL));
+               "s%lx.png", (long)time(NULL) & 0xffff);
       char path[256];
       snprintf(path, sizeof(path), "images/%s", fname);
       char cmd[512];
