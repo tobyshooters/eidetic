@@ -7,7 +7,7 @@ BUILD = build
 
 all: directories $(BUILD)/fliptable
 
-$(BUILD)/fliptable: $(BUILD)/main.o $(BUILD)/db.o $(BUILD)/glyph.o $(BUILD)/eval.o $(BUILD)/cli.o
+$(BUILD)/fliptable: $(BUILD)/main.o $(BUILD)/db.o $(BUILD)/glyph.o $(BUILD)/eval.o $(BUILD)/cli.o $(BUILD)/audio.o $(BUILD)/geometry.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 $(BUILD)/%.o: $(SRC)/%.c

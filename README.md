@@ -2,7 +2,9 @@
 
 An image-based programming system, with a Forth-like stack REPL.
 
-![](./docs/fliptable.png)
+![images](./docs/fliptable.png)
+![audio](./docs/audio.png)
+![geometry](./docs/geometry.png)
 
 State is stored as a single PNG image, making snapshots first-class.
 Text is rendered with a 3x6 bitmap font directly into RGB pixels.
@@ -88,6 +90,30 @@ Since PNG is lossless, audio survives save/load round-trips perfectly.
 PLAY unpacks the pixels back to raw PCM and plays via ffplay.
 RECORD captures from the default PulseAudio input.
 
+### 3D Geometry
+
+    "model.obj" READ              load OBJ as connectivity matrix image
+    tex model RENDER              reconstruct OBJ, apply texture, open in f3d
+
+OBJ files are parsed and encoded into a single image. Vertices with
+different UV mappings are duplicated so each vertex has a unique UV.
+For N (deduplicated) vertices, the image is N rows by (N+4) columns:
+
+- Columns 0-1: vertex position (X, Y, Z as 16-bit per axis across 2 pixels)
+- Columns 2-3: UV texture coordinates (U, V as 16-bit across 2 pixels)
+- Columns 4+: NxN adjacency matrix (face connectivity)
+
+Adjacency encodes face triangles: for edge (i,j) where i < j, the pixel
+stores R=k1, G=k2 (the third vertex of each triangle sharing that edge),
+B=1. White pixels (255,255,255) mean no edge. Coordinates are normalized
+to 0-1 range permanently.
+
+RENDER pops a model image and a texture image from the stack. It writes
+a temp OBJ with a MTL file referencing the texture, then opens f3d.
+Editing the matrix pixels (e.g., with gthumb via EDIT) modifies the geometry.
+
+    "texture.png" READ "cube.obj" READ RENDER
+
 ### Utility
 
     ns pos PIN                move namespace to position (0 = first)
@@ -114,10 +140,12 @@ Save writes the database image to `images/`. On load, the cell structure
 
 ## Files
 
-    src/main.c      REPL + SDL2 window + keyboard input
-    src/db.h/c      Database, cells, rows, PNG I/O, reconstruction
-    src/eval.h/c    Forth-style stack evaluator
-    src/glyph.h/c   3x6 bitmap font (read and write)
-    src/cli.h/c     User input
-    deps/           stb_image headers
-    install.sh      dependency installer
+    src/main.c         REPL + SDL2 window + keyboard input
+    src/db.h/c         Database, cells, rows, PNG I/O, reconstruction
+    src/eval.h/c       Forth-style stack evaluator
+    src/audio.h/c      Audio PCM-as-pixels encoding/decoding
+    src/geometry.h/c   OBJ parsing and connectivity matrix encoding
+    src/glyph.h/c      3x6 bitmap font (read and write)
+    src/cli.h/c        User input
+    deps/              stb_image headers
+    install.sh         dependency installer

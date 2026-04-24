@@ -12,7 +12,9 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "audio.h"
 #include "cli.h"
+#include "geometry.h"
 #include "stb_image_write.h"
 
 
@@ -313,6 +315,42 @@ forth_eval(char* input, Database* db, Stack* stack, Cli* cli)
         cli_set(cli, quoted);
       }
       cell_free_temp(a);
+
+    } else if (strcasecmp(tok, "RENDER") == 0) {
+      Cell* model = pop(stack);
+      Cell* tex = pop(stack);
+      if (model->type == VAL_IMAGE && model->img_data) {
+        char* obj_path = "/tmp/fliptable_model.obj";
+        char* mtl_path = "/tmp/fliptable_model.mtl";
+        char* tex_path = "/tmp/fliptable_tex.png";
+        int has_tex = tex->type == VAL_IMAGE && tex->img_data;
+        if (has_tex) {
+          stbi_write_png(tex_path, tex->img_width, tex->img_height, 3,
+                         tex->img_data, tex->img_width * 3);
+          FILE* mtl = fopen(mtl_path, "w");
+          if (mtl) {
+            fprintf(mtl, "newmtl material0\nmap_Kd %s\n", tex_path);
+            fclose(mtl);
+          }
+        }
+        if (cell_write_obj(model, obj_path, has_tex ? mtl_path : NULL) == 0) {
+          pid_t pid = fork();
+          if (pid == 0) {
+            execlp("f3d", "f3d", obj_path, NULL);
+            _exit(1);
+          } else if (pid > 0) {
+            stack->edit_pid = pid;
+            stack->edit_path[0] = '\0';
+          }
+        }
+      } else {
+        push(stack, tex);
+        tex = NULL;
+      }
+      cell_free_temp(model);
+      if (tex) {
+        cell_free_temp(tex);
+      }
 
     } else if (strcasecmp(tok, "PLAY") == 0) {
       Cell* a = pop(stack);
