@@ -8,8 +8,6 @@ This facilitates reconstruction of state, but should not be considered essential
 
 ![images](./docs/fliptable.png)
 
-## Data model
-
 All variables are a (k,v) pair.
 Keys are strings. Values are strings, integers, or images.
 
@@ -38,7 +36,6 @@ Each namespace is a visual row in the image.
     DUP                       duplicate top
     DROP                      discard top
     SWAP                      swap top two
-    
     a b CAT                   concatenate two values
 
     EXEC                      pop text, execute as Forth
@@ -50,15 +47,6 @@ Each namespace is a visual row in the image.
     "2 *" double SET          store a procedure
     5 double GET EXEC .       -> 10
     5 @double .               -> 10 (shorthand)
-
-### Editing
-
-    val EDIT                  push text/number back to CLI for editing
-    img EDIT                  open image in gthumb for editing
-
-For text and numbers, EDIT places the value (quoted) in the input line so
-you can modify it before submitting. For images, gthumb opens non-blocking
-and the modified image is reloaded onto the stack when closed.
 
 ### Media
 
@@ -73,6 +61,17 @@ Image cells are three rows: key, file path, and pixel data.
 The file path enables re-linking to the source file for image operations like
 RESIZE. If an image cell's source file is missing from disk, it is re-created
 from the pixels stored in the database image.
+
+
+### Editing
+
+    val EDIT                  push text/number back to CLI for editing
+    img EDIT                  open image in gthumb for editing
+
+For text and numbers, EDIT places the value (quoted) in the input line so
+you can modify it before submitting. For images, gthumb opens non-blocking
+and the modified image is reloaded onto the stack when closed.
+
 
 ### Audio
 
@@ -115,11 +114,8 @@ a temp OBJ with a MTL file referencing the texture, then opens f3d.
 Editing the matrix pixels (e.g., with gthumb via EDIT) modifies the geometry.
 
     "texture.png" READ "cube.obj" READ RENDER
-
-### Utility
-
-    ns pos PIN                move namespace to position (0 = first)
-
+    
+    
 ### Persistence
 
     name SAVE                 save db to images/name
@@ -133,6 +129,10 @@ Save writes the database image to `images/`. On load, the cell structure
 - Values are detected as text (gray pixels) or image data
 - Image cells include a file path header above the pixel data
 
+
+### Utility
+
+    ns pos PIN                move namespace to position (0 = first)
 
 ## Keyboard shortcuts
 
