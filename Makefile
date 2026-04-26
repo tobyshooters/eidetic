@@ -5,9 +5,9 @@ LDFLAGS = -lSDL2 -lm
 SRC = src
 BUILD = build
 
-all: directories $(BUILD)/fliptable
+all: directories $(BUILD)/aguafuerte
 
-$(BUILD)/fliptable: $(BUILD)/main.o $(BUILD)/db.o $(BUILD)/glyph.o $(BUILD)/eval.o $(BUILD)/cli.o $(BUILD)/audio.o $(BUILD)/geometry.o
+$(BUILD)/aguafuerte: $(BUILD)/main.o $(BUILD)/db.o $(BUILD)/glyph.o $(BUILD)/eval.o $(BUILD)/cli.o $(BUILD)/audio.o $(BUILD)/geometry.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 $(BUILD)/%.o: $(SRC)/%.c
@@ -16,8 +16,8 @@ $(BUILD)/%.o: $(SRC)/%.c
 directories:
 	mkdir -p $(BUILD)
 
-run: $(BUILD)/fliptable
-	./$(BUILD)/fliptable
+run: $(BUILD)/aguafuerte
+	./$(BUILD)/aguafuerte
 
 test: directories $(BUILD)/db.o $(BUILD)/glyph.o
 	$(CC) $(CFLAGS) -I$(SRC) -o $(BUILD)/test_reconstruct tests/test_reconstruct.c $(BUILD)/db.o $(BUILD)/glyph.o -lm
@@ -28,7 +28,7 @@ test: directories $(BUILD)/db.o $(BUILD)/glyph.o
 	./$(BUILD)/test_load_db
 
 debug: CFLAGS += -g -DDEBUG -O0 -ggdb3
-debug: directories $(BUILD)/fliptable
+debug: directories $(BUILD)/aguafuerte
 
 format:
 	clang-format --style=Mozilla -i $(SRC)/main.c $(SRC)/db.c $(SRC)/glyph.c $(SRC)/eval.c

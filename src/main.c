@@ -204,7 +204,7 @@ main(int argc, char* argv[])
   update_content(&db);
 
   SDL_Window* window =
-    SDL_CreateWindow("fliptable",
+    SDL_CreateWindow("aguafuerte",
                      SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
                      content_w * SCALE, content_h * SCALE,
                      SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);

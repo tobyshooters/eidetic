@@ -331,9 +331,9 @@ forth_eval(char* input, Database* db, Stack* stack, Cli* cli)
       Cell* model = pop(stack);
       Cell* tex = pop(stack);
       if (model->type == VAL_IMAGE && model->img_data) {
-        char* obj_path = "/tmp/fliptable_model.obj";
-        char* mtl_path = "/tmp/fliptable_model.mtl";
-        char* tex_path = "/tmp/fliptable_tex.png";
+        char* obj_path = "/tmp/aguafuerte_model.obj";
+        char* mtl_path = "/tmp/aguafuerte_model.mtl";
+        char* tex_path = "/tmp/aguafuerte_tex.png";
         int has_tex = tex->type == VAL_IMAGE && tex->img_data;
         if (has_tex) {
           stbi_write_png(tex_path, tex->img_width, tex->img_height, 3,
@@ -366,7 +366,7 @@ forth_eval(char* input, Database* db, Stack* stack, Cli* cli)
     } else if (strcasecmp(tok, "PLAY") == 0) {
       Cell* a = pop(stack);
       if (a->type == VAL_IMAGE && a->img_data) {
-        char tmp[] = "/tmp/fliptable_play.raw";
+        char tmp[] = "/tmp/aguafuerte_play.raw";
         if (cell_write_pcm(a, tmp) == 0) {
           pid_t pid = fork();
           if (pid == 0) {

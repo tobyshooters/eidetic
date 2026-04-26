@@ -1,4 +1,4 @@
-Follow the style guide at: `./Style.md`
+Follow the style guide at: `docs/style.md`
 
 The idea is an image database.
 Concretely, the database is an image, meaning a PNG!
