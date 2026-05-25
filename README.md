@@ -1,3 +1,7 @@
+Full disclosure: this project is aggressively vibe-coded. The emphasis is on
+the "everything is an image" conceptual dimension, and *not* the
+implementation.
+
 # Aguafuerte
 
 An image-based programming system, with a Forth-like stack REPL.
