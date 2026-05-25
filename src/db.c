@@ -9,9 +9,59 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <dirent.h>
 #include <errno.h>
 
 #define IMG_DIR "images"
+
+Theme theme = {
+  .bg         = { 255, 255, 255 },
+  .text       = {   0,   0,   0 },
+  .text_dim   = {  60,  60,  60 },
+  .text_faint = { 120, 120, 120 },
+  .scroll     = { 180, 180, 180 },
+  .cursor     = {   0,  56, 255 },
+  .command    = {   0,  56, 255 },
+  .process    = { 200, 120,   0 },
+  .process_done = {  0, 160,  0 },
+  .grid       = { 200, 220, 255 },
+};
+
+void
+theme_load(char* path)
+{
+  FILE* f = fopen(path, "r");
+  if (!f) {
+    return;
+  }
+  char line[256];
+  while (fgets(line, sizeof(line), f)) {
+    char name[64];
+    int r, g, b;
+    if (sscanf(line, "%63s %d %d %d", name, &r, &g, &b) != 4) {
+      continue;
+    }
+    uint8_t* dst = NULL;
+    if (strcmp(name, "bg") == 0) { dst = theme.bg; }
+    else if (strcmp(name, "text") == 0) { dst = theme.text; }
+    else if (strcmp(name, "text_dim") == 0) { dst = theme.text_dim; }
+    else if (strcmp(name, "text_faint") == 0) { dst = theme.text_faint; }
+    else if (strcmp(name, "scroll") == 0) { dst = theme.scroll; }
+    else if (strcmp(name, "cursor") == 0) { dst = theme.cursor; }
+    else if (strcmp(name, "command") == 0) { dst = theme.command; }
+    else if (strcmp(name, "process") == 0) { dst = theme.process; }
+    else if (strcmp(name, "process_done") == 0) { dst = theme.process_done; }
+    else if (strcmp(name, "grid") == 0) { dst = theme.grid; }
+    if (dst) {
+      dst[0] = (uint8_t)r;
+      dst[1] = (uint8_t)g;
+      dst[2] = (uint8_t)b;
+    }
+  }
+  fclose(f);
+}
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -19,6 +69,16 @@
 #include "stb_image_write.h"
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
+
+static void
+fill_bg(uint8_t* data, int npixels)
+{
+  for (int i = 0; i < npixels; i++) {
+    data[i * 3] = theme.bg[0];
+    data[i * 3 + 1] = theme.bg[1];
+    data[i * 3 + 2] = theme.bg[2];
+  }
+}
 
 void
 image_alloc(Image* img, int width, int height)
@@ -28,7 +88,7 @@ image_alloc(Image* img, int width, int height)
   img->alloc_width = width * 2;
   img->alloc_height = height * 2;
   img->data = calloc(img->alloc_width * img->alloc_height * 3, 1);
-  memset(img->data, 255, img->alloc_width * img->alloc_height * 3);
+  fill_bg(img->data, img->alloc_width * img->alloc_height);
 }
 
 void
@@ -42,7 +102,9 @@ image_realloc(Image* img, int width, int height)
       for (int y = 0; y < old_height; y++) {
         for (int x = old_width; x < width; x++) {
           int idx = (y * img->alloc_width + x) * 3;
-          img->data[idx] = img->data[idx + 1] = img->data[idx + 2] = 255;
+          img->data[idx] = theme.bg[0];
+          img->data[idx + 1] = theme.bg[1];
+          img->data[idx + 2] = theme.bg[2];
         }
       }
     }
@@ -50,7 +112,9 @@ image_realloc(Image* img, int width, int height)
       for (int y = old_height; y < height; y++) {
         for (int x = 0; x < width; x++) {
           int idx = (y * img->alloc_width + x) * 3;
-          img->data[idx] = img->data[idx + 1] = img->data[idx + 2] = 255;
+          img->data[idx] = theme.bg[0];
+          img->data[idx + 1] = theme.bg[1];
+          img->data[idx + 2] = theme.bg[2];
         }
       }
     }
@@ -62,7 +126,7 @@ image_realloc(Image* img, int width, int height)
   int new_alloc_w = MAX(img->alloc_width, width) * 2;
   int new_alloc_h = MAX(img->alloc_height, height) * 2;
   uint8_t* new_data = calloc(new_alloc_w * new_alloc_h * 3, 1);
-  memset(new_data, 255, new_alloc_w * new_alloc_h * 3);
+  fill_bg(new_data, new_alloc_w * new_alloc_h);
 
   for (int y = 0; y < img->height; y++) {
     for (int x = 0; x < img->width; x++) {
@@ -92,7 +156,7 @@ image_free(Image* img)
 void
 image_clear(Image* img)
 {
-  memset(img->data, 255, img->alloc_width * img->alloc_height * 3);
+  fill_bg(img->data, img->alloc_width * img->alloc_height);
 }
 
 void
@@ -152,8 +216,11 @@ static int
 cell_val_height(Cell* cell, float scale)
 {
   int gy = FONT_HEIGHT + 2;
-  if (cell->type == VAL_IMAGE) {
+  if (cell->type == VAL_IMAGE || cell->type == VAL_COMMAND) {
     return PATH_HEIGHT + grid_align(img_scaled(cell->img_height, scale), gy);
+  }
+  if (cell->type == VAL_PROCESS) {
+    return gy * 3;
   }
   return gy;
 }
@@ -182,10 +249,30 @@ static int
 cell_display_width(Cell* cell, float scale)
 {
   int vw;
-  if (cell->type == VAL_IMAGE) {
+  if (cell->type == VAL_IMAGE || cell->type == VAL_COMMAND) {
     int pw = text_width(cell->value);
     int iw = img_scaled(cell->img_width, scale);
     vw = MAX(pw, iw);
+  } else if (cell->type == VAL_PROCESS) {
+    char pid_buf[32];
+    snprintf(pid_buf, sizeof(pid_buf), "%d", cell->args);
+    char state[MAX_KEY] = "";
+    char cmd_name[MAX_KEY] = "";
+    char* tab = strchr(cell->value, '\t');
+    if (tab) {
+      int slen = tab - cell->value;
+      if (slen >= MAX_KEY) slen = MAX_KEY - 1;
+      memcpy(state, cell->value, slen);
+      state[slen] = '\0';
+      snprintf(cmd_name, MAX_KEY, "%s", tab + 1);
+    } else {
+      snprintf(state, MAX_KEY, "%s", cell->value);
+    }
+    vw = text_width(pid_buf);
+    int sw = text_width(state);
+    int cw = text_width(cmd_name);
+    if (sw > vw) vw = sw;
+    if (cw > vw) vw = cw;
   } else {
     vw = text_width(cell->value);
   }
@@ -282,6 +369,7 @@ cell_copy_value(Cell* dst, Cell* src)
   strcpy(dst->value, src->value);
   dst->num = src->num;
   dst->type = src->type;
+  dst->args = src->args;
   dst->img_width = src->img_width;
   dst->img_height = src->img_height;
   if (src->img_data) {
@@ -375,11 +463,15 @@ find_or_create_row(Database* db, char* ns)
     }
   }
 
-  Row* row = &db->rows[db->row_count];
+  for (int i = db->row_count; i > 0; i--) {
+    db->rows[i] = db->rows[i - 1];
+  }
+  db->row_count++;
+
+  Row* row = &db->rows[0];
   memset(row, 0, sizeof(Row));
   strcpy(row->ns, ns);
   row->height = KEY_HEIGHT + FONT_HEIGHT + 2;
-  db->row_count++;
 
   recompute_row_offsets(db);
   return row;
@@ -416,12 +508,17 @@ render_cell(Image* img, Cell* cell, int y_offset, float scale)
 {
   int key_y = y_offset + 1;
   int val_y = y_offset + KEY_HEIGHT + 1;
+  uint8_t* kc = theme.text;
+  if (cell->type == VAL_COMMAND) { kc = theme.command; }
+  else if (cell->type == VAL_PROCESS) {
+    kc = cell->num > 0 ? theme.process : theme.process_done;
+  }
   write_text(img->data, img->alloc_width, cell->key, cell->col + 1, key_y,
-             0, 0, 0);
+             kc[0], kc[1], kc[2]);
 
-  if (cell->type == VAL_IMAGE && cell->img_data) {
+  if ((cell->type == VAL_IMAGE || cell->type == VAL_COMMAND) && cell->img_data) {
     write_text(img->data, img->alloc_width, cell->value, cell->col + 1, val_y,
-               60, 60, 60);
+               theme.text_dim[0], theme.text_dim[1], theme.text_dim[2]);
     int dw = img_scaled(cell->img_width, scale);
     int dh = img_scaled(cell->img_height, scale);
     int ox = cell->col + 1;
@@ -443,9 +540,33 @@ render_cell(Image* img, Cell* cell, int y_offset, float scale)
         }
       }
     }
+  } else if (cell->type == VAL_PROCESS) {
+    int line_h = FONT_HEIGHT + 2;
+    char pid_buf[32];
+    snprintf(pid_buf, sizeof(pid_buf), "%d", cell->args);
+    char state[MAX_KEY] = "";
+    char cmd_name[MAX_KEY] = "";
+    char* tab = strchr(cell->value, '\t');
+    if (tab) {
+      int slen = tab - cell->value;
+      if (slen >= MAX_KEY) slen = MAX_KEY - 1;
+      memcpy(state, cell->value, slen);
+      state[slen] = '\0';
+      snprintf(cmd_name, MAX_KEY, "%s", tab + 1);
+    } else {
+      snprintf(state, MAX_KEY, "%s", cell->value);
+    }
+    uint8_t* pc = cell->num > 0 ? theme.process : theme.process_done;
+    write_text(img->data, img->alloc_width, pid_buf, cell->col + 1, val_y,
+               theme.text_dim[0], theme.text_dim[1], theme.text_dim[2]);
+    write_text(img->data, img->alloc_width, state, cell->col + 1,
+               val_y + line_h, pc[0], pc[1], pc[2]);
+    write_text(img->data, img->alloc_width, cmd_name, cell->col + 1,
+               val_y + line_h * 2,
+               theme.text_faint[0], theme.text_faint[1], theme.text_faint[2]);
   } else {
     write_text(img->data, img->alloc_width, cell->value, cell->col + 1, val_y,
-               60, 60, 60);
+               theme.text_dim[0], theme.text_dim[1], theme.text_dim[2]);
   }
 }
 
@@ -472,13 +593,15 @@ render_row(Database* db, Row* row)
   for (int y = row->y_offset; y < row->y_offset + rh && y < db->img.alloc_height; y++) {
     for (int x = 0; x < db->img.alloc_width; x++) {
       int idx = (y * db->img.alloc_width + x) * 3;
-      db->img.data[idx] = db->img.data[idx + 1] = db->img.data[idx + 2] = 255;
+      db->img.data[idx] = theme.bg[0];
+      db->img.data[idx + 1] = theme.bg[1];
+      db->img.data[idx + 2] = theme.bg[2];
     }
   }
 
   int label_y = row->y_offset + 1;
   write_text(db->img.data, db->img.alloc_width, row->ns, 1, label_y,
-             120, 120, 120);
+             theme.text_faint[0], theme.text_faint[1], theme.text_faint[2]);
 
   for (int i = 0; i < row->cell_count; i++) {
     if (!row->cells[i].tombstone) {
@@ -492,10 +615,14 @@ render_row(Database* db, Row* row)
       if (row->cells[i].tombstone) {
         continue;
       }
+      ValType vt = row->cells[i].type;
+      if (vt == VAL_IMAGE || vt == VAL_COMMAND || vt == VAL_PROCESS) {
+        continue;
+      }
       float t = (float)(row->cell_count - 1 - i) / (float)row->cell_count;
-      uint8_t r = 60 + (uint8_t)(t * (255 - 60));
-      uint8_t g = 60 + (uint8_t)(t * (255 - 60));
-      uint8_t b = 60 + (uint8_t)(t * (255 - 60));
+      uint8_t r = theme.text_dim[0] + (uint8_t)(t * (theme.bg[0] - theme.text_dim[0]));
+      uint8_t g = theme.text_dim[1] + (uint8_t)(t * (theme.bg[1] - theme.text_dim[1]));
+      uint8_t b = theme.text_dim[2] + (uint8_t)(t * (theme.bg[2] - theme.text_dim[2]));
       write_text(db->img.data, db->img.alloc_width,
                  row->cells[i].value, row->cells[i].col + 1, val_y,
                  r, g, b);
@@ -604,7 +731,8 @@ cell_read_text_file(char* path)
   memset(pixels, 255, w * h * 3);
 
   for (int i = 0; i < nlines; i++) {
-    write_text(pixels, w, wrapped[i], 0, i * line_h, 0, 0, 0);
+    write_text(pixels, w, wrapped[i], 0, i * line_h,
+               theme.text[0], theme.text[1], theme.text[2]);
   }
 
   Cell* c = calloc(1, sizeof(Cell));
@@ -634,6 +762,10 @@ cell_read_image(char* path)
     return cell_read_obj(path);
   }
 
+  if (has_ext(path, ".sh")) {
+    return cell_read_command(path);
+  }
+
   if (has_ext(path, ".txt") || has_ext(path, ".md")) {
     return cell_read_text_file(path);
   }
@@ -654,6 +786,125 @@ cell_read_image(char* path)
   c->img_width = w;
   c->img_height = h;
   snprintf(c->value, MAX_KEY, "%s", path);
+  return c;
+}
+
+Cell*
+cell_read_command(char* path)
+{
+  char resolved[512];
+  if (!resolve_path(path, resolved, sizeof(resolved))) {
+    return NULL;
+  }
+  FILE* f = fopen(resolved, "r");
+  if (!f) {
+    return NULL;
+  }
+
+  int max_arg = 0;
+  char wrapped[1024][TEXT_WRAP + 1];
+  int nlines = 0;
+  char raw[1024];
+
+  while (nlines < 1024 && fgets(raw, sizeof(raw), f)) {
+    int len = strlen(raw);
+    if (len > 0 && raw[len - 1] == '\n') {
+      raw[--len] = '\0';
+    }
+
+    for (int ci = 0; ci < len - 1; ci++) {
+      if (raw[ci] != '$') {
+        continue;
+      }
+      char d = raw[ci + 1];
+      if (d == '{' && ci + 2 < len && raw[ci + 2] >= '1' && raw[ci + 2] <= '9') {
+        d = raw[ci + 2];
+      }
+      if (d >= '1' && d <= '9') {
+        int n = d - '0';
+        if (n > max_arg) {
+          max_arg = n;
+        }
+      }
+    }
+
+    if (len == 0) {
+      wrapped[nlines][0] = '\0';
+      nlines++;
+      continue;
+    }
+
+    int pos = 0;
+    while (pos < len && nlines < 1024) {
+      int chunk = len - pos;
+      if (chunk <= TEXT_WRAP) {
+        memcpy(wrapped[nlines], raw + pos, chunk);
+        wrapped[nlines][chunk] = '\0';
+        nlines++;
+        break;
+      }
+      int brk = TEXT_WRAP;
+      while (brk > 0 && raw[pos + brk] != ' ') {
+        brk--;
+      }
+      if (brk == 0) {
+        brk = TEXT_WRAP;
+      }
+      memcpy(wrapped[nlines], raw + pos, brk);
+      wrapped[nlines][brk] = '\0';
+      nlines++;
+      pos += brk;
+      if (raw[pos] == ' ') {
+        pos++;
+      }
+    }
+  }
+  fclose(f);
+
+  if (nlines == 0) {
+    return NULL;
+  }
+
+  int max_len = 0;
+  for (int i = 0; i < nlines; i++) {
+    int len = strlen(wrapped[i]);
+    if (len > max_len) {
+      max_len = len;
+    }
+  }
+  if (max_len == 0) {
+    max_len = 1;
+  }
+
+  int line_h = FONT_HEIGHT + 2;
+  int w = max_len * (FONT_WIDTH + 1) + 1;
+  int h = nlines * line_h + 1;
+  uint8_t* pix = malloc(w * h * 3);
+  memset(pix, 255, w * h * 3);
+
+  for (int i = 0; i < nlines; i++) {
+    write_text(pix, w, wrapped[i], 0, i * line_h,
+               theme.text[0], theme.text[1], theme.text[2]);
+  }
+
+  Cell* c = calloc(1, sizeof(Cell));
+  c->type = VAL_COMMAND;
+  c->img_data = pix;
+  c->img_width = w;
+  c->img_height = h;
+  c->args = max_arg;
+  snprintf(c->value, MAX_KEY, "%s", path);
+  return c;
+}
+
+Cell*
+cell_make_process(char* cmd_name, pid_t pid)
+{
+  Cell* c = calloc(1, sizeof(Cell));
+  c->type = VAL_PROCESS;
+  c->args = (int)pid;
+  snprintf(c->value, MAX_KEY, "running\t%s", cmd_name);
+  strncpy(c->key, cmd_name, MAX_KEY - 1);
   return c;
 }
 
@@ -903,7 +1154,10 @@ static int
 is_dark(uint8_t* data, int alloc_width, int x, int y)
 {
   int idx = (y * alloc_width + x) * 3;
-  return data[idx] < 200 || data[idx + 1] < 200 || data[idx + 2] < 200;
+  int thr = 55;
+  return abs(data[idx] - theme.bg[0]) > thr ||
+         abs(data[idx + 1] - theme.bg[1]) > thr ||
+         abs(data[idx + 2] - theme.bg[2]) > thr;
 }
 
 static void
@@ -1039,7 +1293,11 @@ db_reconstruct(Database* db)
         }
 
         if (has_pixels) {
-          cell->type = VAL_IMAGE;
+          if (has_ext(cell->value, ".sh")) {
+            cell->type = VAL_COMMAND;
+          } else {
+            cell->type = VAL_IMAGE;
+          }
 
           int ix1 = vx, iy1 = img_y;
           for (int sy = img_y; sy < row_bottom && sy < img->height; sy++) {
@@ -1142,12 +1400,52 @@ db_load(Database* db, char* filename)
           stbi_write_png(path, c->img_width, c->img_height, 3,
                          c->img_data, c->img_width * 3);
         }
+        int cvlen = strlen(c->value);
+        if (cvlen > 8 && strcmp(c->value + cvlen - 8, ".obj.png") == 0) {
+          char obj_path[512];
+          snprintf(obj_path, sizeof(obj_path), "%s/%.*s",
+                   IMG_DIR, cvlen - 4, c->value);
+          cell_write_obj(c, obj_path, NULL);
+        }
       }
     }
   }
 
   render_all(db);
   return 0;
+}
+
+void
+db_load_commands(Database* db)
+{
+  DIR* dir = opendir("commands");
+  if (!dir) {
+    return;
+  }
+  struct dirent* ent;
+  while ((ent = readdir(dir)) != NULL) {
+    if (!has_ext(ent->d_name, ".sh")) {
+      continue;
+    }
+    char path[512];
+    snprintf(path, sizeof(path), "commands/%s", ent->d_name);
+    Cell* cmd = cell_read_command(path);
+    if (!cmd) {
+      continue;
+    }
+    char name[64];
+    strncpy(name, ent->d_name, sizeof(name) - 1);
+    name[sizeof(name) - 1] = '\0';
+    char* dot = strrchr(name, '.');
+    if (dot) {
+      *dot = '\0';
+    }
+    char key[MAX_KEY];
+    snprintf(key, sizeof(key), "sys.%s", name);
+    db_set_cell(db, key, cmd);
+    cell_free_temp(cmd);
+  }
+  closedir(dir);
 }
 
 void
@@ -1202,4 +1500,43 @@ db_load_stack(Database* db, Cell** items, int max_items)
     return count;
   }
   return 0;
+}
+
+int
+process_poll(Cell** items, int count)
+{
+  int changed = 0;
+  for (int i = 0; i < count; i++) {
+    Cell* c = items[i];
+    if (c->type != VAL_PROCESS || c->num <= 0) {
+      continue;
+    }
+    int status;
+    pid_t result = waitpid((pid_t)c->args, &status, WNOHANG);
+    if (result <= 0) {
+      continue;
+    }
+    char output[MAX_KEY] = { 0 };
+    int n = read(c->num, output, sizeof(output) - 1);
+    if (n > 0) {
+      output[n] = '\0';
+      while (n > 0 && (output[n - 1] == '\n' || output[n - 1] == '\r')) {
+        output[--n] = '\0';
+      }
+    }
+    close(c->num);
+    c->num = 0;
+    char* tab = strchr(c->value, '\t');
+    char cmd_name[MAX_KEY] = "";
+    if (tab) {
+      strncpy(cmd_name, tab + 1, MAX_KEY - 1);
+    }
+    if (output[0]) {
+      snprintf(c->value, MAX_KEY, "done:%s\t%s", output, cmd_name);
+    } else {
+      snprintf(c->value, MAX_KEY, "done\t%s", cmd_name);
+    }
+    changed = 1;
+  }
+  return changed;
 }

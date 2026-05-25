@@ -12,8 +12,7 @@ typedef struct
 {
   Cell* items[MAX_STACK];
   int top;
-  pid_t edit_pid;
-  char edit_path[256];
+  int bang;
 } Stack;
 
 void

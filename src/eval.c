@@ -7,7 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -101,6 +100,13 @@ forth_eval(char* input, Database* db, Stack* stack, Cli* cli)
       continue;
     }
 
+    int bang = 0;
+    int toklen = strlen(tok);
+    if (toklen > 1 && tok[toklen - 1] == '!') {
+      tok[toklen - 1] = '\0';
+      bang = 1;
+    }
+
     if (strcasecmp(tok, "SET") == 0) {
       Cell* key = pop(stack);
       Cell* val = pop(stack);
@@ -141,6 +147,7 @@ forth_eval(char* input, Database* db, Stack* stack, Cli* cli)
       Cell* name = pop(stack);
       db_load(db, name->value);
       cell_free_temp(name);
+      db_load_commands(db);
       for (int si = 0; si < stack->top; si++) {
         cell_free_temp(stack->items[si]);
       }
@@ -152,53 +159,130 @@ forth_eval(char* input, Database* db, Stack* stack, Cli* cli)
       cell_free_temp(path);
       push(stack, img ? img : cell_make_nil());
 
-    } else if (strcasecmp(tok, "SCREENSHOT") == 0) {
-      char fname[128];
-      snprintf(fname, sizeof(fname),
-               "s%lx.png", (long)time(NULL) & 0xffff);
-      char path[256];
-      snprintf(path, sizeof(path), "images/%s", fname);
-      pid_t pid = fork();
-      if (pid == 0) {
-        execlp("scrot", "scrot", "-s", path, NULL);
-        _exit(1);
-      } else if (pid > 0) {
-        stack->edit_pid = pid;
-        snprintf(stack->edit_path, sizeof(stack->edit_path), "%s", fname);
+    } else if (strcasecmp(tok, "SPAWN") == 0) {
+      Cell* cmd = pop(stack);
+      if (cmd->type != VAL_COMMAND) {
+        push(stack, cmd);
+        continue;
+      }
+      int arity = cmd->args;
+      char* argv_strs[16];
+      memset(argv_strs, 0, sizeof(argv_strs));
+      for (int ai = arity - 1; ai >= 0 && ai < 16; ai--) {
+        Cell* arg = pop(stack);
+        if (arg->type == VAL_IMAGE && arg->img_data) {
+          char tmp_png[256], tmp_raw[256];
+          snprintf(tmp_png, sizeof(tmp_png),
+                   "/tmp/aguafuerte_arg%d.png", ai);
+          snprintf(tmp_raw, sizeof(tmp_raw),
+                   "/tmp/aguafuerte_arg%d.raw", ai);
+          stbi_write_png(tmp_png, arg->img_width, arg->img_height,
+                         3, arg->img_data, arg->img_width * 3);
+          cell_write_pcm(arg, tmp_raw);
+          int vlen = strlen(arg->value);
+          if (vlen > 8 && strcmp(arg->value + vlen - 8, ".obj.png") == 0) {
+            char tmp_obj[256];
+            snprintf(tmp_obj, sizeof(tmp_obj),
+                     "/tmp/aguafuerte_arg%d.obj", ai);
+            cell_write_obj(arg, tmp_obj, NULL);
+            argv_strs[ai] = strdup(tmp_obj);
+          } else {
+            argv_strs[ai] = strdup(tmp_png);
+          }
+        } else {
+          argv_strs[ai] = strdup(arg->value);
+        }
+        cell_free_temp(arg);
       }
 
-    } else if (strcasecmp(tok, "RESIZE") == 0) {
-      Cell* size = pop(stack);
-      Cell* img = pop(stack);
-      int sz = cell_to_num(size);
-      if (img->type == VAL_IMAGE && img->value[0] && sz > 0) {
-        char out[256];
-        char* dot = strrchr(img->value, '.');
-        if (dot) {
-          int base = dot - img->value;
-          snprintf(out, sizeof(out), "%.*s_%d%s", base, img->value, sz, dot);
-        } else {
-          snprintf(out, sizeof(out), "%s_%d", img->value, sz);
-        }
-        char src_path[512], out_path[512];
-        snprintf(src_path, sizeof(src_path), "images/%s", img->value);
-        snprintf(out_path, sizeof(out_path), "images/%s", out);
-        char sz_str[32];
-        snprintf(sz_str, sizeof(sz_str), "%dx%d", sz, sz);
-        pid_t pid = fork();
-        if (pid == 0) {
-          execlp("convert", "convert", src_path, "-resize", sz_str,
-                 out_path, NULL);
-          _exit(1);
-        } else if (pid > 0) {
-          stack->edit_pid = pid;
-          snprintf(stack->edit_path, sizeof(stack->edit_path), "%s", out);
-        }
-      } else {
-        push(stack, img);
+      char script_path[256];
+      snprintf(script_path, sizeof(script_path), "%s", cmd->value);
+
+      int pipefd[2];
+      if (pipe(pipefd) < 0) {
+        cell_free_temp(cmd);
+        continue;
       }
-      cell_free_temp(size);
-      cell_free_temp(img);
+
+      pid_t pid = fork();
+      if (pid == 0) {
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
+
+        char* exec_argv[20];
+        int ei = 0;
+        exec_argv[ei++] = "bash";
+        char resolved_script[512];
+        if (resolve_path(script_path, resolved_script,
+                         sizeof(resolved_script))) {
+          exec_argv[ei++] = resolved_script;
+        } else {
+          exec_argv[ei++] = script_path;
+        }
+        for (int ai = 0; ai < arity && ei < 18; ai++) {
+          exec_argv[ei++] = argv_strs[ai];
+        }
+        exec_argv[ei] = NULL;
+        execvp("bash", exec_argv);
+        _exit(1);
+      } else if (pid > 0) {
+        close(pipefd[1]);
+        char* cmd_name = cmd->key[0] ? cmd->key : "cmd";
+        Cell* proc = cell_make_process(cmd_name, pid);
+        proc->num = pipefd[0];
+        push(stack, proc);
+      }
+      for (int ai = 0; ai < arity; ai++) {
+        free(argv_strs[ai]);
+      }
+      cell_free_temp(cmd);
+
+    } else if (strcasecmp(tok, "WAIT") == 0) {
+      Cell* proc = pop(stack);
+      if (proc->type != VAL_PROCESS) {
+        push(stack, proc);
+        continue;
+      }
+
+      if (proc->num > 0) {
+        char output[256] = { 0 };
+        int n = read(proc->num, output, sizeof(output) - 1);
+        if (n > 0) {
+          output[n] = '\0';
+          while (n > 0 && (output[n-1] == '\n' || output[n-1] == '\r')) {
+            output[--n] = '\0';
+          }
+        }
+        close(proc->num);
+        proc->num = 0;
+        int status;
+        waitpid((pid_t)proc->args, &status, 0);
+        char* tab = strchr(proc->value, '\t');
+        char cmd_name[MAX_KEY] = "";
+        if (tab) {
+          strncpy(cmd_name, tab + 1, MAX_KEY - 1);
+        }
+        if (output[0]) {
+          snprintf(proc->value, MAX_KEY, "done:%s\t%s", output, cmd_name);
+        } else {
+          snprintf(proc->value, MAX_KEY, "done\t%s", cmd_name);
+        }
+      }
+
+      char* out = NULL;
+      if (strncmp(proc->value, "done:", 5) == 0) {
+        out = proc->value + 5;
+        char* tab = strchr(out, '\t');
+        if (tab) *tab = '\0';
+      }
+      if (out && out[0]) {
+        Cell* result = cell_read_image(out);
+        if (result) {
+          push(stack, result);
+        }
+      }
+      cell_free_temp(proc);
 
     } else if (strcmp(tok, "+") == 0) {
       Cell* b = pop(stack);
@@ -298,142 +382,16 @@ forth_eval(char* input, Database* db, Stack* stack, Cli* cli)
 
     } else if (strcasecmp(tok, "EDIT") == 0) {
       Cell* a = pop(stack);
-      if (a->type == VAL_IMAGE && a->img_data && a->value[0]) {
-        char out[256];
-        char* dot = strrchr(a->value, '.');
-        if (dot) {
-          int base = dot - a->value;
-          snprintf(out, sizeof(out), "%.*s_edit%s", base, a->value, dot);
-        } else {
-          snprintf(out, sizeof(out), "%s_edit", a->value);
-        }
-        char out_path[512];
-        snprintf(out_path, sizeof(out_path), "images/%s", out);
-        mkdir("images", 0755);
-        stbi_write_png(out_path, a->img_width, a->img_height, 3,
-                       a->img_data, a->img_width * 3);
-        pid_t pid = fork();
-        if (pid == 0) {
-          execlp("gthumb", "gthumb", out_path, NULL);
-          _exit(1);
-        } else if (pid > 0) {
-          stack->edit_pid = pid;
-          snprintf(stack->edit_path, sizeof(stack->edit_path), "%s", out);
-        }
-      } else if ((a->type == VAL_TEXT || a->type == VAL_NUM) && cli) {
+      if ((a->type == VAL_TEXT || a->type == VAL_NUM) && cli) {
         char quoted[MAX_INPUT];
         snprintf(quoted, sizeof(quoted), "\"%s\"", a->value);
         cli_set(cli, quoted);
-      }
-      cell_free_temp(a);
-
-    } else if (strcasecmp(tok, "RENDER") == 0) {
-      Cell* model = pop(stack);
-      Cell* tex = pop(stack);
-      if (model->type == VAL_IMAGE && model->img_data) {
-        char* obj_path = "/tmp/aguafuerte_model.obj";
-        char* mtl_path = "/tmp/aguafuerte_model.mtl";
-        char* tex_path = "/tmp/aguafuerte_tex.png";
-        int has_tex = tex->type == VAL_IMAGE && tex->img_data;
-        if (has_tex) {
-          stbi_write_png(tex_path, tex->img_width, tex->img_height, 3,
-                         tex->img_data, tex->img_width * 3);
-          FILE* mtl = fopen(mtl_path, "w");
-          if (mtl) {
-            fprintf(mtl, "newmtl material0\nmap_Kd %s\n", tex_path);
-            fclose(mtl);
-          }
-        }
-        if (cell_write_obj(model, obj_path, has_tex ? mtl_path : NULL) == 0) {
-          pid_t pid = fork();
-          if (pid == 0) {
-            execlp("f3d", "f3d", obj_path, NULL);
-            _exit(1);
-          } else if (pid > 0) {
-            stack->edit_pid = pid;
-            stack->edit_path[0] = '\0';
-          }
-        }
       } else {
-        push(stack, tex);
-        tex = NULL;
+        push(stack, a);
+        a = NULL;
       }
-      cell_free_temp(model);
-      if (tex) {
-        cell_free_temp(tex);
-      }
-
-    } else if (strcasecmp(tok, "PLAY") == 0) {
-      Cell* a = pop(stack);
-      if (a->type == VAL_IMAGE && a->img_data) {
-        char tmp[] = "/tmp/aguafuerte_play.raw";
-        if (cell_write_pcm(a, tmp) == 0) {
-          pid_t pid = fork();
-          if (pid == 0) {
-            execlp("ffplay", "ffplay", "-autoexit", "-nodisp",
-                   "-f", "s16le", "-ar", "8000", "-ac", "1",
-                   tmp, NULL);
-            _exit(1);
-          } else if (pid > 0) {
-            stack->edit_pid = pid;
-            stack->edit_path[0] = '\0';
-          }
-        }
-      }
-      cell_free_temp(a);
-
-    } else if (strcasecmp(tok, "RECORD") == 0) {
-      Cell* dur = pop(stack);
-      int secs = cell_to_num(dur);
-      cell_free_temp(dur);
-      if (secs <= 0) {
-        secs = 5;
-      }
-      char fname[128];
-      snprintf(fname, sizeof(fname), "r%lx.png", (long)time(NULL) & 0xffff);
-      char out_path[512];
-      snprintf(out_path, sizeof(out_path), "images/%s", fname);
-      char dur_str[16];
-      snprintf(dur_str, sizeof(dur_str), "%d", secs);
-      pid_t pid = fork();
-      if (pid == 0) {
-        char cmd[1024];
-        snprintf(cmd, sizeof(cmd),
-                 "ffmpeg -f pulse -i default -ar 8000 -ac 1 "
-                 "-t %s -f s16le pipe:1 2>/dev/null",
-                 dur_str);
-        FILE* fp = popen(cmd, "r");
-        if (!fp) {
-          _exit(1);
-        }
-        int16_t* pcm = malloc(8000 * secs * sizeof(int16_t));
-        int n = 0;
-        int16_t sample;
-        while (n < 8000 * secs &&
-               fread(&sample, sizeof(int16_t), 1, fp) == 1) {
-          pcm[n++] = sample;
-        }
-        pclose(fp);
-        if (n > 0) {
-          int w = 256;
-          int h = (n + w - 1) / w;
-          uint8_t* pixels = calloc(w * h * 3, 1);
-          for (int i = 0; i < n; i++) {
-            uint16_t u = (uint16_t)pcm[i];
-            int idx = i * 3;
-            pixels[idx] = (u >> 8) & 0xFF;
-            pixels[idx + 1] = u & 0xFF;
-            pixels[idx + 2] = 0;
-          }
-          mkdir("images", 0755);
-          stbi_write_png(out_path, w, h, 3, pixels, w * 3);
-          free(pixels);
-        }
-        free(pcm);
-        _exit(0);
-      } else if (pid > 0) {
-        stack->edit_pid = pid;
-        snprintf(stack->edit_path, sizeof(stack->edit_path), "%s", fname);
+      if (a) {
+        cell_free_temp(a);
       }
 
     } else if (strcmp(tok, ".") == 0) {
@@ -444,7 +402,27 @@ forth_eval(char* input, Database* db, Stack* stack, Cli* cli)
       cell_free_temp(a);
 
     } else {
-      push(stack, cell_make_text(tok));
+      char lower[MAX_KEY];
+      int li = 0;
+      for (int ci = 0; tok[ci] && li < MAX_KEY - 1; ci++) {
+        lower[li++] = tolower((unsigned char)tok[ci]);
+      }
+      lower[li] = '\0';
+      char sys_key[MAX_KEY + 8];
+      snprintf(sys_key, sizeof(sys_key), "sys.%s", lower);
+      Cell* sys = db_get_cell(db, sys_key);
+      if (sys && sys->type == VAL_COMMAND) {
+        push(stack, cell_copy(sys));
+        if (bang) {
+          forth_eval("spawn", db, stack, cli);
+          stack->bang = 1;
+        }
+      } else {
+        if (bang) {
+          tok[strlen(tok)] = '!';
+        }
+        push(stack, cell_make_text(tok));
+      }
     }
   }
 }

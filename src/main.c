@@ -1,9 +1,9 @@
 #include <ctype.h>
+#include <dirent.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/wait.h>
 
 #include <SDL2/SDL.h>
 
@@ -15,10 +15,11 @@
 #define DEFAULT_H 64
 #define DEFAULT_W 128
 
-#define SCALE 4
+static int ui_scale = 8;
 #define SCROLL_STEP 8
 #define INPUT_ROW_H (FONT_HEIGHT + 2 + ROW_GAP)
 
+static int scroll_x = 0;
 static int scroll_y = 0;
 static int content_w = 0;
 static int content_h = 0;
@@ -49,27 +50,41 @@ update_content(Database* db)
 }
 
 static void
-update_win_size(SDL_Window* window)
+update_win_size(SDL_Window* window, Database* db)
 {
   int pw, ph;
   SDL_GetWindowSize(window, &pw, &ph);
-  win_vw = pw / SCALE;
-  win_vh = ph / SCALE;
+  win_vw = pw / ui_scale;
+  win_vh = ph / ui_scale;
+  if (db) {
+    db->max_width = win_vw;
+  }
 }
 
 static void
 clamp_scroll(void)
 {
-  int visible = win_vh - INPUT_ROW_H;
-  int max = content_h - INPUT_ROW_H - visible;
-  if (max < 0) {
-    max = 0;
+  int visible_h = win_vh - INPUT_ROW_H;
+  int max_y = content_h - INPUT_ROW_H - visible_h;
+  if (max_y < 0) {
+    max_y = 0;
   }
-  if (scroll_y > max) {
-    scroll_y = max;
+  if (scroll_y > max_y) {
+    scroll_y = max_y;
   }
   if (scroll_y < 0) {
     scroll_y = 0;
+  }
+
+  int max_x = content_w - win_vw;
+  if (max_x < 0) {
+    max_x = 0;
+  }
+  if (scroll_x > max_x) {
+    scroll_x = max_x;
+  }
+  if (scroll_x < 0) {
+    scroll_x = 0;
   }
 }
 
@@ -81,7 +96,7 @@ remake_texture(SDL_Renderer* renderer, SDL_Texture* old,
     SDL_DestroyTexture(old);
   }
   update_content(db);
-  update_win_size(window);
+  update_win_size(window, db);
   return SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24,
                            SDL_TEXTUREACCESS_STREAMING,
                            win_vw, win_vh);
@@ -92,19 +107,25 @@ render(SDL_Renderer* renderer, SDL_Texture* texture, Database* db, Cli* cli)
 {
   Image* img = &db->img;
   uint8_t* packed = malloc(win_vw * win_vh * 3);
-  memset(packed, 255, win_vw * win_vh * 3);
+  for (int i = 0; i < win_vw * win_vh; i++) {
+    packed[i * 3] = theme.bg[0];
+    packed[i * 3 + 1] = theme.bg[1];
+    packed[i * 3 + 2] = theme.bg[2];
+  }
 
-  write_text(packed, win_vw, ">", 1, 1, 120, 120, 120);
+  write_text(packed, win_vw, ">", 1, 1,
+             theme.text_faint[0], theme.text_faint[1], theme.text_faint[2]);
   int text_x = 1 + FONT_WIDTH + 1 + 1;
-  write_text(packed, win_vw, cli->buf, text_x, 1, 0, 0, 0);
+  write_text(packed, win_vw, cli->buf, text_x, 1,
+             theme.text[0], theme.text[1], theme.text[2]);
 
   int cursor_x = text_x + cli->cursor * (FONT_WIDTH + 1);
   if (cursor_x < win_vw) {
     for (int cy = 0; cy < FONT_HEIGHT; cy++) {
       int idx = ((1 + cy) * win_vw + cursor_x) * 3;
-      packed[idx] = 0;
-      packed[idx + 1] = 56;
-      packed[idx + 2] = 255;
+      packed[idx] = theme.cursor[0];
+      packed[idx + 1] = theme.cursor[1];
+      packed[idx + 2] = theme.cursor[2];
     }
   }
 
@@ -112,9 +133,18 @@ render(SDL_Renderer* renderer, SDL_Texture* texture, Database* db, Cli* cli)
     int dot_y = INPUT_ROW_H - 1;
     for (int x = 0; x < win_vw; x += 2) {
       int idx = (dot_y * win_vw + x) * 3;
-      packed[idx] = 180;
-      packed[idx + 1] = 180;
-      packed[idx + 2] = 180;
+      packed[idx] = theme.scroll[0];
+      packed[idx + 1] = theme.scroll[1];
+      packed[idx + 2] = theme.scroll[2];
+    }
+  }
+
+  if (scroll_x > 0) {
+    for (int y = INPUT_ROW_H; y < win_vh; y += 2) {
+      int idx = (y * win_vw + 0) * 3;
+      packed[idx] = theme.scroll[0];
+      packed[idx + 1] = theme.scroll[1];
+      packed[idx + 2] = theme.scroll[2];
     }
   }
 
@@ -123,8 +153,12 @@ render(SDL_Renderer* renderer, SDL_Texture* texture, Database* db, Cli* cli)
     if (sy < 0 || sy >= img->height) {
       continue;
     }
-    for (int x = 0; x < win_vw && x < img->width; x++) {
-      int src = (sy * img->alloc_width + x) * 3;
+    for (int x = 0; x < win_vw; x++) {
+      int sx = x + scroll_x;
+      if (sx < 0 || sx >= img->width) {
+        continue;
+      }
+      int src = (sy * img->alloc_width + sx) * 3;
       int dst = (y * win_vw + x) * 3;
       packed[dst] = img->data[src];
       packed[dst + 1] = img->data[src + 1];
@@ -135,18 +169,21 @@ render(SDL_Renderer* renderer, SDL_Texture* texture, Database* db, Cli* cli)
   if (show_grid) {
     int gx = FONT_WIDTH + 1;
     int gy = FONT_HEIGHT + 2;
-    int max_x = win_vw < img->width ? win_vw : img->width;
     for (int y = INPUT_ROW_H; y < win_vh; y++) {
       int ay = y - INPUT_ROW_H + scroll_y;
       if (ay < 0 || ay >= img->height) {
         continue;
       }
-      for (int x = 0; x < max_x; x++) {
-        if (x % gx == 0 || ay % gy == 0) {
+      for (int x = 0; x < win_vw; x++) {
+        int ax = x + scroll_x;
+        if (ax < 0 || ax >= img->width) {
+          continue;
+        }
+        if (ax % gx == 0 || ay % gy == 0) {
           int idx = (y * win_vw + x) * 3;
-          packed[idx] = (packed[idx] + 200) / 2;
-          packed[idx + 1] = (packed[idx + 1] + 220) / 2;
-          packed[idx + 2] = (packed[idx + 2] + 255) / 2;
+          packed[idx] = (packed[idx] + theme.grid[0]) / 2;
+          packed[idx + 1] = (packed[idx + 1] + theme.grid[1]) / 2;
+          packed[idx + 2] = (packed[idx + 2] + theme.grid[2]) / 2;
         }
       }
     }
@@ -156,35 +193,43 @@ render(SDL_Renderer* renderer, SDL_Texture* texture, Database* db, Cli* cli)
   free(packed);
 
   SDL_RenderClear(renderer);
-  SDL_Rect dst_rect = { 0, 0, win_vw * SCALE, win_vh * SCALE };
+  SDL_Rect dst_rect = { 0, 0, win_vw * ui_scale, win_vh * ui_scale };
   SDL_RenderCopy(renderer, texture, NULL, &dst_rect);
   SDL_RenderPresent(renderer);
 }
 
 static Stack stack = { 0 };
 
-static void
+static bool
 handle_submit(char* line, Database* db, Cli* cli, bool* running)
 {
   while (*line && isspace(*line)) {
     line++;
   }
   if (!*line) {
-    return;
+    return false;
   }
 
   if (strcasecmp(line, "quit") == 0 || strcasecmp(line, "exit") == 0) {
     *running = false;
-    return;
+    return false;
   }
 
   forth_eval(line, db, &stack, cli);
   db_sync_stack(db, stack.items, stack.top);
+
+  if (stack.bang) {
+    stack.bang = 0;
+    return true;
+  }
+  return false;
 }
 
 int
 main(int argc, char* argv[])
 {
+  theme_load("THEME.txt");
+
   Database db;
   db_init(&db);
 
@@ -196,6 +241,8 @@ main(int argc, char* argv[])
     }
   }
 
+  db_load_commands(&db);
+
   if (SDL_Init(SDL_INIT_VIDEO) < 0) {
     fprintf(stderr, "SDL: %s\n", SDL_GetError());
     return 1;
@@ -203,10 +250,14 @@ main(int argc, char* argv[])
 
   update_content(&db);
 
+  int init_w = content_w * ui_scale;
+  if (init_w > DEFAULT_W * ui_scale) {
+    init_w = DEFAULT_W * ui_scale;
+  }
   SDL_Window* window =
     SDL_CreateWindow("aguafuerte",
                      SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-                     content_w * SCALE, content_h * SCALE,
+                     init_w, content_h * ui_scale,
                      SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
   SDL_Renderer* renderer =
     SDL_CreateRenderer(window, -1,
@@ -214,7 +265,7 @@ main(int argc, char* argv[])
   SDL_Texture* texture =
     remake_texture(renderer, NULL, window, &db);
 
-  SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+  SDL_SetRenderDrawColor(renderer, theme.bg[0], theme.bg[1], theme.bg[2], 255);
   SDL_StartTextInput();
 
   Cli cli;
@@ -242,7 +293,12 @@ main(int argc, char* argv[])
         }
 
       } else if (event.type == SDL_MOUSEWHEEL) {
-        scroll_y -= event.wheel.y * SCROLL_STEP;
+        if (SDL_GetModState() & KMOD_SHIFT) {
+          scroll_x -= event.wheel.y * SCROLL_STEP;
+        } else {
+          scroll_x -= event.wheel.x * SCROLL_STEP;
+          scroll_y -= event.wheel.y * SCROLL_STEP;
+        }
         clamp_scroll();
 
       } else if (event.type == SDL_KEYDOWN) {
@@ -251,9 +307,16 @@ main(int argc, char* argv[])
 
         if (key == SDLK_RETURN) {
           if (cli_submit(&cli, submitted, sizeof(submitted))) {
-            handle_submit(submitted, &db, &cli, &running);
+            bool needs_wait = handle_submit(submitted, &db, &cli, &running);
             texture = remake_texture(renderer, texture, window, &db);
             clamp_scroll();
+            if (needs_wait) {
+              render(renderer, texture, &db, &cli);
+              forth_eval("wait", &db, &stack, &cli);
+              db_sync_stack(&db, stack.items, stack.top);
+              texture = remake_texture(renderer, texture, window, &db);
+              clamp_scroll();
+            }
           }
 
         } else if (key == SDLK_BACKSPACE) {
@@ -261,9 +324,19 @@ main(int argc, char* argv[])
         } else if (key == SDLK_DELETE) {
           cli_delete(&cli);
         } else if (key == SDLK_LEFT) {
-          cli_left(&cli);
+          if (mod & KMOD_CTRL) {
+            scroll_x -= SCROLL_STEP;
+            clamp_scroll();
+          } else {
+            cli_left(&cli);
+          }
         } else if (key == SDLK_RIGHT) {
-          cli_right(&cli);
+          if (mod & KMOD_CTRL) {
+            scroll_x += SCROLL_STEP;
+            clamp_scroll();
+          } else {
+            cli_right(&cli);
+          }
         } else if (key == SDLK_HOME ||
                    ((mod & KMOD_CTRL) && key == SDLK_a)) {
           cli_home(&cli);
@@ -288,14 +361,15 @@ main(int argc, char* argv[])
             cli_history_down(&cli);
           }
 
-        } else if ((mod & KMOD_CTRL) && key == SDLK_MINUS) {
+        } else if ((mod & KMOD_CTRL) && (mod & KMOD_SHIFT) &&
+                   key == SDLK_MINUS) {
           if (db.img_scale > 0.1f) {
             db.img_scale *= 0.5f;
             db_render(&db);
             texture = remake_texture(renderer, texture, window, &db);
             clamp_scroll();
           }
-        } else if ((mod & KMOD_CTRL) &&
+        } else if ((mod & KMOD_CTRL) && (mod & KMOD_SHIFT) &&
                    (key == SDLK_EQUALS || key == SDLK_PLUS)) {
           db.img_scale *= 2.0f;
           if (db.img_scale > 4.0f) {
@@ -304,25 +378,30 @@ main(int argc, char* argv[])
           db_render(&db);
           texture = remake_texture(renderer, texture, window, &db);
           clamp_scroll();
+        } else if ((mod & KMOD_CTRL) && !(mod & KMOD_SHIFT) &&
+                   key == SDLK_MINUS) {
+          if (ui_scale > 2) {
+            ui_scale /= 2;
+            texture = remake_texture(renderer, texture, window, &db);
+            clamp_scroll();
+          }
+        } else if ((mod & KMOD_CTRL) && !(mod & KMOD_SHIFT) &&
+                   (key == SDLK_EQUALS || key == SDLK_PLUS)) {
+          if (ui_scale < 32) {
+            ui_scale *= 2;
+            texture = remake_texture(renderer, texture, window, &db);
+            clamp_scroll();
+          }
         } else if ((mod & KMOD_CTRL) && key == SDLK_g) {
           show_grid = !show_grid;
         }
       }
     }
 
-    if (stack.edit_pid > 0) {
-      int status;
-      if (waitpid(stack.edit_pid, &status, WNOHANG) > 0) {
-        Cell* img = cell_read_image(stack.edit_path);
-        if (img) {
-          stack.items[stack.top++] = img;
-        }
-        stack.edit_pid = 0;
-        stack.edit_path[0] = '\0';
-        db_sync_stack(&db, stack.items, stack.top);
-        texture = remake_texture(renderer, texture, window, &db);
-        clamp_scroll();
-      }
+    if (process_poll(stack.items, stack.top)) {
+      db_sync_stack(&db, stack.items, stack.top);
+      texture = remake_texture(renderer, texture, window, &db);
+      clamp_scroll();
     }
 
     render(renderer, texture, &db, &cli);

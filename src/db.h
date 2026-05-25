@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #define MAX_KEY 128
 #define MAX_ROWS 64
@@ -25,6 +26,8 @@ typedef enum
   VAL_TEXT,
   VAL_NUM,
   VAL_IMAGE,
+  VAL_COMMAND,
+  VAL_PROCESS,
   VAL_NIL
 } ValType;
 
@@ -36,6 +39,7 @@ typedef struct
   ValType type;
   uint8_t* img_data;
   int img_width, img_height;
+  int args;
   int col;
   int width;
   bool tombstone;
@@ -60,6 +64,25 @@ typedef struct
   float img_scale;
   char filename[256];
 } Database;
+
+typedef struct
+{
+  uint8_t bg[3];
+  uint8_t text[3];
+  uint8_t text_dim[3];
+  uint8_t text_faint[3];
+  uint8_t scroll[3];
+  uint8_t cursor[3];
+  uint8_t command[3];
+  uint8_t process[3];
+  uint8_t process_done[3];
+  uint8_t grid[3];
+} Theme;
+
+extern Theme theme;
+
+void
+theme_load(char* path);
 
 void
 image_alloc(Image* img, int width, int height);
@@ -110,6 +133,10 @@ db_load(Database* db, char* filename);
 
 Cell*
 cell_read_image(char* path);
+Cell*
+cell_read_command(char* path);
+Cell*
+cell_make_process(char* cmd_name, pid_t pid);
 
 char*
 resolve_path(char* path, char* out, int outsize);
@@ -117,8 +144,13 @@ int
 has_ext(char* path, char* ext);
 
 void
+db_load_commands(Database* db);
+void
 db_sync_stack(Database* db, Cell** items, int count);
 int
 db_load_stack(Database* db, Cell** items, int max_items);
+
+int
+process_poll(Cell** items, int count);
 
 #endif

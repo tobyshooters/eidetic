@@ -208,11 +208,11 @@ cell_read_obj(char* path)
     int p2 = (i * w + 2) * 3;
     pixels[p2] = (nu >> 8) & 0xFF;
     pixels[p2 + 1] = nu & 0xFF;
-    pixels[p2 + 2] = (nvu >> 8) & 0xFF;
+    pixels[p2 + 2] = 0;
 
     int p3 = (i * w + 3) * 3;
-    pixels[p3] = nvu & 0xFF;
-    pixels[p3 + 1] = 0;
+    pixels[p3] = (nvu >> 8) & 0xFF;
+    pixels[p3 + 1] = nvu & 0xFF;
     pixels[p3 + 2] = 0;
   }
 
@@ -242,13 +242,7 @@ cell_read_obj(char* path)
   free(faces);
 
   char out[256];
-  char* dot = strrchr(path, '.');
-  if (dot) {
-    int base = dot - path;
-    snprintf(out, sizeof(out), "%.*s_mesh.png", base, path);
-  } else {
-    snprintf(out, sizeof(out), "%s_mesh.png", path);
-  }
+  snprintf(out, sizeof(out), "%s.png", path);
 
   char out_path[512];
   snprintf(out_path, sizeof(out_path), "images/%s", out);
@@ -300,7 +294,7 @@ cell_write_obj(Cell* cell, char* out_path, char* mtl_path)
     int p2 = (i * w + 2) * 3;
     int p3 = (i * w + 3) * 3;
     uint16_t nu = ((uint16_t)cell->img_data[p2] << 8) | cell->img_data[p2 + 1];
-    uint16_t nvu = ((uint16_t)cell->img_data[p2 + 2] << 8) | cell->img_data[p3];
+    uint16_t nvu = ((uint16_t)cell->img_data[p3] << 8) | cell->img_data[p3 + 1];
 
     float u = nu / 65535.0f;
     float v = nvu / 65535.0f;

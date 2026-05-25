@@ -19,13 +19,15 @@ directories:
 run: $(BUILD)/aguafuerte
 	./$(BUILD)/aguafuerte
 
-test: directories $(BUILD)/db.o $(BUILD)/glyph.o
-	$(CC) $(CFLAGS) -I$(SRC) -o $(BUILD)/test_reconstruct tests/test_reconstruct.c $(BUILD)/db.o $(BUILD)/glyph.o -lm
+test: directories $(BUILD)/db.o $(BUILD)/glyph.o $(BUILD)/geometry.o $(BUILD)/audio.o
+	$(CC) $(CFLAGS) -I$(SRC) -o $(BUILD)/test_reconstruct tests/test_reconstruct.c $(BUILD)/db.o $(BUILD)/glyph.o $(BUILD)/geometry.o $(BUILD)/audio.o -lm
 	./$(BUILD)/test_reconstruct
-	$(CC) $(CFLAGS) -I$(SRC) -o $(BUILD)/test_img_ns tests/test_img_ns.c $(BUILD)/db.o $(BUILD)/glyph.o -lm
+	$(CC) $(CFLAGS) -I$(SRC) -o $(BUILD)/test_img_ns tests/test_img_ns.c $(BUILD)/db.o $(BUILD)/glyph.o $(BUILD)/geometry.o $(BUILD)/audio.o -lm
 	./$(BUILD)/test_img_ns
 	$(CC) $(CFLAGS) -I$(SRC) -o $(BUILD)/test_load_db tests/test_load_db.c $(BUILD)/glyph.o -lm
 	./$(BUILD)/test_load_db
+	$(CC) $(CFLAGS) -I$(SRC) -o $(BUILD)/test_geometry tests/test_geometry.c $(BUILD)/db.o $(BUILD)/glyph.o $(BUILD)/geometry.o $(BUILD)/audio.o -lm
+	./$(BUILD)/test_geometry
 
 debug: CFLAGS += -g -DDEBUG -O0 -ggdb3
 debug: directories $(BUILD)/aguafuerte
