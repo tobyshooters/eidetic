@@ -1,6 +1,5 @@
-Full disclosure: this project is aggressively vibe-coded. The emphasis is on
-the "everything is an image" conceptual dimension, and *not* the
-implementation.
+**Full disclosure: this project is aggressively vibe-coded. The emphasis is on
+the "everything is an image" concept, and *not* the implementation.**
 
 # Aguafuerte
 
